@@ -82,11 +82,12 @@ class TUI:
         return host, int(port)
 
     @staticmethod
-    def print_chat_header(client_id: int, connected: bool):
+    def print_chat_header(client_id: int, connected: bool, participant_count: int = 1):
         status = f"{TUI.GREEN}Connected{TUI.RESET}" if connected else f"{TUI.RED}Disconnected{TUI.RESET}"
         print(f"""
 {TUI.BLACK}{TUI.BG_WHITE}╔══════════════════════════════════════════════════════╗
 ║ OpenChat                              ID: {client_id}    Status: {status}  ║
+║ Participants: {participant_count}{' ' * 42}║
 ╚══════════════════════════════════════════════════════╝{TUI.RESET}
 """)
 
@@ -117,6 +118,7 @@ class ChatClient:
         self.message_id_counter = 0
         self.connected = False
         self.new_message_event = threading.Event()
+        self.participant_count = 1
 
     def connect(self, host: str, port: int) -> bool:
         try:
@@ -130,6 +132,7 @@ class ChatClient:
             
             if response['type'] == 'connected':
                 self.client_id = response['client_id']
+                self.participant_count = response.get('participant_count', 1)
                 self.running = True
                 self.connected = True
                 logger.info(f"Connected with ID: {self.client_id}")
@@ -180,6 +183,11 @@ class ChatClient:
                     self.messages.append(msg)
                     self.new_message_event.set()
                     logger.info(f"System message: {content}")
+                
+                elif msg_type == 'participants':
+                    count = message.get('count', 1)
+                    self.participant_count = count
+                    self.new_message_event.set()
                     
             except Exception as e:
                 logger.error(f"Receive error: {e}")
@@ -222,7 +230,7 @@ class ChatClient:
                 self.new_message_event.clear()
                 if self.connected:
                     TUI.clear_screen()
-                    TUI.print_chat_header(self.client_id, self.connected)
+                    TUI.print_chat_header(self.client_id, self.connected, self.participant_count)
                     TUI.print_messages(list(self.messages), self.client_id)
                     print(f"\n{TUI.CYAN}>> {TUI.RESET}", end="")
         

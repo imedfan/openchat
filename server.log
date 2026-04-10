@@ -55,3 +55,29 @@
 2026-04-10 11:18:31,609 - INFO - Server started on 172.24.0.1:5000
 2026-04-10 11:18:41,643 - INFO - Server stopped
 2026-04-10 11:19:03,064 - INFO - Server stopped
+2026-04-10 11:19:11,786 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 11:19:27,061 - INFO - Client 1 connected from ('172.24.0.1', 64460)
+2026-04-10 11:19:33,919 - INFO - Client 2 connected from ('172.24.0.1', 64498)
+2026-04-10 11:19:35,333 - INFO - Message from 2 acknowledged
+2026-04-10 11:19:35,334 - INFO - Broadcast message from 2: fjbb
+2026-04-10 11:19:42,111 - INFO - Message from 1 acknowledged
+2026-04-10 11:19:42,113 - INFO - Broadcast message from 1: как сам
+2026-04-10 11:19:47,322 - INFO - Message from 2 acknowledged
+2026-04-10 11:19:47,323 - INFO - Broadcast message from 2: да пойдет
+2026-04-10 11:20:01,546 - INFO - Message from 2 acknowledged
+2026-04-10 11:20:01,547 - INFO - Broadcast message from 2: нихуя ты лют
+2026-04-10 11:20:07,237 - INFO - Message from 1 acknowledged
+2026-04-10 11:20:07,237 - INFO - Broadcast message from 1: да ты тож
+2026-04-10 11:20:19,047 - ERROR - Client 1 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:20:19,047 - INFO - Client 1 disconnected
+2026-04-10 11:20:24,255 - INFO - Message from 2 acknowledged
+2026-04-10 11:20:24,256 - INFO - Broadcast message from 2: f nfr
+2026-04-10 11:24:00,961 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 11:24:18,440 - INFO - Client 1 connected from ('172.24.0.1', 49635)
+2026-04-10 11:24:33,666 - INFO - Client 2 connected from ('172.24.0.1', 50702)
+2026-04-10 11:24:37,829 - INFO - Message from 2 acknowledged
+2026-04-10 11:24:37,829 - INFO - Broadcast message from 2: как сам
+2026-04-10 11:24:43,346 - INFO - Message from 1 acknowledged
+2026-04-10 11:24:43,347 - INFO - Broadcast message from 1: да номарс
+2026-04-10 11:24:50,748 - ERROR - Client 2 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:24:50,749 - INFO - Client 2 disconnected

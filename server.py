@@ -69,10 +69,12 @@ class ChatServer:
                         self.clients[client_id] = client_socket
                         self.client_addresses[client_id] = address
                         self.client_id_counter += 1
+                        participant_count = len(self.clients)
                     
                     response = json.dumps({
                         'type': 'connected',
-                        'client_id': client_id
+                        'client_id': client_id,
+                        'participant_count': participant_count
                     })
                     client_socket.send(response.encode('utf-8'))
                     logger.info(f"Client {client_id} connected from {address}")
@@ -83,6 +85,12 @@ class ChatServer:
                         'timestamp': datetime.now().strftime('%H:%M')
                     })
                     self.broadcast(join_msg, exclude=[client_id])
+                    
+                    count_msg = json.dumps({
+                        'type': 'participants',
+                        'count': participant_count
+                    })
+                    self.broadcast(count_msg)
 
                 elif msg_type == 'message':
                     content = message.get('content', '')
@@ -122,6 +130,13 @@ class ChatServer:
                     'timestamp': datetime.now().strftime('%H:%M')
                 })
                 self.broadcast(leave_msg)
+                
+                participant_count = len(self.clients)
+                count_msg = json.dumps({
+                    'type': 'participants',
+                    'count': participant_count
+                })
+                self.broadcast(count_msg)
                 logger.info(f"Client {client_id} disconnected")
 
             client_socket.close()
