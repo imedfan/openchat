@@ -22,6 +22,7 @@ class ChatServer:
         self.server_socket = None
         self.clients = {}
         self.client_addresses = {}
+        self.client_usernames = {}
         self.client_id_counter = 1
         self.running = False
         self.lock = threading.Lock()
@@ -64,10 +65,12 @@ class ChatServer:
                 msg_type = message.get('type')
 
                 if msg_type == 'connect':
+                    username = message.get('username', '')
                     with self.lock:
                         client_id = self.client_id_counter
                         self.clients[client_id] = client_socket
                         self.client_addresses[client_id] = address
+                        self.client_usernames[client_id] = username
                         self.client_id_counter += 1
                         participant_count = len(self.clients)
                     
@@ -77,11 +80,11 @@ class ChatServer:
                         'participant_count': participant_count
                     })
                     client_socket.send(response.encode('utf-8'))
-                    logger.info(f"Client {client_id} connected from {address}")
+                    logger.info(f"Client {client_id} ({username}) connected from {address}")
 
                     join_msg = json.dumps({
                         'type': 'system',
-                        'message': f'User {client_id} joined the chat',
+                        'message': f'{username} joined the chat',
                         'timestamp': datetime.now().strftime('%H:%M')
                     })
                     self.broadcast(join_msg, exclude=[client_id])
@@ -96,11 +99,13 @@ class ChatServer:
                     content = message.get('content', '')
                     with self.lock:
                         sender_socket = self.clients.get(client_id)
+                        sender_username = self.client_usernames.get(client_id, f"User {client_id}")
                     
                     if sender_socket:
                         ack = json.dumps({
                             'type': 'ack',
-                            'message_id': message.get('message_id')
+                            'message_id': message.get('message_id'),
+                            'username': sender_username
                         })
                         sender_socket.send(ack.encode('utf-8'))
                         logger.info(f"Message from {client_id} acknowledged")
@@ -108,6 +113,7 @@ class ChatServer:
                     broadcast_msg = json.dumps({
                         'type': 'message',
                         'client_id': client_id,
+                        'username': sender_username,
                         'content': content,
                         'timestamp': datetime.now().strftime('%H:%M')
                     })
@@ -118,15 +124,18 @@ class ChatServer:
             logger.error(f"Client {client_id} error: {e}")
         finally:
             if client_id:
+                username = self.client_usernames.get(client_id, f"User {client_id}")
                 with self.lock:
                     if client_id in self.clients:
                         del self.clients[client_id]
                     if client_id in self.client_addresses:
                         del self.client_addresses[client_id]
+                    if client_id in self.client_usernames:
+                        del self.client_usernames[client_id]
                 
                 leave_msg = json.dumps({
                     'type': 'system',
-                    'message': f'User {client_id} left the chat',
+                    'message': f'{username} left the chat',
                     'timestamp': datetime.now().strftime('%H:%M')
                 })
                 self.broadcast(leave_msg)
@@ -137,7 +146,7 @@ class ChatServer:
                     'count': participant_count
                 })
                 self.broadcast(count_msg)
-                logger.info(f"Client {client_id} disconnected")
+                logger.info(f"Client {client_id} ({username}) disconnected")
 
             client_socket.close()
 

@@ -4,6 +4,8 @@ import logging
 import json
 import sys
 import os
+import random
+import string
 from datetime import datetime
 from collections import deque
 from typing import Optional, Dict, Any
@@ -19,13 +21,15 @@ logger = logging.getLogger(__name__)
 
 class Message:
     def __init__(self, content: str, is_mine: bool = False, client_id: Optional[int] = None, 
-                 timestamp: str = "", acknowledged: bool = False, message_id: str = ""):
+                 timestamp: str = "", acknowledged: bool = False, message_id: str = "", 
+                 username: str = ""):
         self.content = content
         self.is_mine = is_mine
         self.client_id = client_id
         self.timestamp = timestamp
         self.acknowledged = acknowledged
         self.message_id = message_id
+        self.username = username
 
 class TUI:
     BLACK = "\033[30m"
@@ -50,6 +54,10 @@ class TUI:
         os.system('cls' if os.name == 'nt' else 'clear')
 
     @staticmethod
+    def generate_username():
+        return ''.join(random.choices(string.ascii_uppercase, k=6))
+
+    @staticmethod
     def print_welcome():
         TUI.clear_screen()
         print(f"""
@@ -66,8 +74,11 @@ class TUI:
 ║                                                      ║
 ╚══════════════════════════════════════════════════════╝{TUI.RESET}
 """)
-        print(f"{TUI.GRAY}Press Enter to continue...{TUI.RESET}")
-        input()
+        username = input(f"{TUI.YELLOW}Enter your username: {TUI.RESET}").strip()
+        if not username:
+            username = TUI.generate_username()
+            print(f"{TUI.GRAY}Generated username: {username}{TUI.RESET}")
+        return username
 
     @staticmethod
     def print_connect_dialog():
@@ -82,25 +93,27 @@ class TUI:
         return host, int(port)
 
     @staticmethod
-    def print_chat_header(client_id: int, connected: bool, participant_count: int = 1):
+    def print_chat_header(client_id: int, connected: bool, participant_count: int = 1, username: str = ""):
         status = f"{TUI.GREEN}Connected{TUI.RESET}" if connected else f"{TUI.RED}Disconnected{TUI.RESET}"
+        user_display = f" | {username}" if username else f" | ID: {client_id}"
         print(f"""
 {TUI.BLACK}{TUI.BG_WHITE}╔══════════════════════════════════════════════════════╗
-║ OpenChat                              ID: {client_id}    Status: {status}  ║
-║ Participants: {participant_count}{' ' * 42}║
+║ OpenChat{user_display}{' ' * (53 - len(user_display))}║
+║ Participants: {participant_count}{' ' * 40}║
 ╚══════════════════════════════════════════════════════╝{TUI.RESET}
 """)
 
     @staticmethod
-    def print_messages(messages: list, my_id: int):
+    def print_messages(messages: list, my_id: int, my_username: str = ""):
         print(f"\n{TUI.GRAY}{'─'*62}{TUI.RESET}")
         for msg in messages:
-            sender = "You" if msg.is_mine or msg.client_id == my_id else f"User {msg.client_id}"
-            if msg.is_mine:
+            if msg.is_mine or msg.client_id == my_id:
+                sender = my_username if my_username else "You"
                 color = TUI.GREEN if msg.acknowledged else TUI.GRAY
                 ack_status = "✓" if msg.acknowledged else "..."
                 print(f"{msg.timestamp} - {sender}: {msg.content} {color}{ack_status}{TUI.RESET}")
             else:
+                sender = msg.username if msg.username else f"User {msg.client_id}"
                 print(f"{msg.timestamp} - {sender}: {msg.content}")
         print(f"{TUI.GRAY}{'─'*62}{TUI.RESET}\n")
 
@@ -112,6 +125,7 @@ class ChatClient:
     def __init__(self):
         self.socket = None
         self.client_id: Optional[int] = None
+        self.username: str = ""
         self.running = False
         self.messages: deque = deque(maxlen=100)
         self.pending_messages: Dict[str, Message] = {}
@@ -120,12 +134,12 @@ class ChatClient:
         self.new_message_event = threading.Event()
         self.participant_count = 1
 
-    def connect(self, host: str, port: int) -> bool:
+    def connect(self, host: str, port: int, username: str) -> bool:
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.connect((host, port))
             
-            connect_msg = json.dumps({'type': 'connect'})
+            connect_msg = json.dumps({'type': 'connect', 'username': username})
             self.socket.send(connect_msg.encode('utf-8'))
             
             response = json.loads(self.socket.recv(4096).decode('utf-8'))
@@ -168,10 +182,11 @@ class ChatClient:
                 
                 elif msg_type == 'message':
                     client_id = message.get('client_id')
+                    username = message.get('username', '')
                     content = message.get('content', '')
                     timestamp = message.get('timestamp', '')
                     
-                    msg = Message(content, is_mine=False, client_id=client_id, timestamp=timestamp)
+                    msg = Message(content, is_mine=False, client_id=client_id, timestamp=timestamp, username=username)
                     self.messages.append(msg)
                     self.new_message_event.set()
                     logger.info(f"Received message from user {client_id}: {content[:50]}")
@@ -230,16 +245,16 @@ class ChatClient:
                 self.new_message_event.clear()
                 if self.connected:
                     TUI.clear_screen()
-                    TUI.print_chat_header(self.client_id, self.connected, self.participant_count)
-                    TUI.print_messages(list(self.messages), self.client_id)
+                    TUI.print_chat_header(self.client_id, self.connected, self.participant_count, self.username)
+                    TUI.print_messages(list(self.messages), self.client_id, self.username)
                     print(f"\n{TUI.CYAN}>> {TUI.RESET}", end="")
         
     def run(self):
-        TUI.print_welcome()
+        self.username = TUI.print_welcome()
         
         host, port = TUI.print_connect_dialog()
         
-        if not self.connect(host, port):
+        if not self.connect(host, port, self.username):
             print(f"\n{TUI.RED}Failed to connect. Press Enter to exit...{TUI.RESET}")
             input()
             return
@@ -254,7 +269,7 @@ class ChatClient:
         
         while self.connected:
             TUI.clear_screen()
-            TUI.print_chat_header(self.client_id, self.connected)
+            TUI.print_chat_header(self.client_id, self.connected, self.participant_count, self.username)
             TUI.print_messages(list(self.messages), self.client_id)
             
             try:
