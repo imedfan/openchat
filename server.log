@@ -136,3 +136,62 @@
 2026-04-10 14:33:05,891 - INFO - Client 5 (dffd) disconnected
 2026-04-10 14:33:07,400 - ERROR - Client 6 error: [WinError 10054] An existing connection was forcibly closed by the remote host
 2026-04-10 14:33:07,401 - INFO - Client 6 (aas172.24.0.1) disconnected
+2026-04-10 23:55:43,581 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 23:55:49,139 - INFO - Client 1 (MUHOBX) connected from ('172.24.0.1', 55350)
+2026-04-10 23:56:41,142 - INFO - Client 2 (GYNDIA) connected from ('172.24.0.1', 55744)
+2026-04-10 23:59:20,091 - ERROR - Client 1 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 23:59:20,091 - INFO - Client 1 (MUHOBX) disconnected
+2026-04-10 23:59:36,235 - INFO - Client 3 (QSERFH) connected from ('172.24.0.1', 61114)
+2026-04-10 23:59:55,449 - ERROR - Client 2 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 23:59:55,449 - INFO - Client 2 (GYNDIA) disconnected
+2026-04-11 00:00:07,311 - INFO - Client 4 (RWYBTS) connected from ('172.24.0.1', 61279)
+2026-04-11 00:00:36,374 - ERROR - Client 3 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:00:36,376 - INFO - Client 3 (QSERFH) disconnected
+2026-04-11 00:00:37,357 - ERROR - Client 4 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:00:37,357 - INFO - Client 4 (RWYBTS) disconnected
+2026-04-11 00:02:14,200 - INFO - Server stopped
+2026-04-11 00:02:17,865 - INFO - Server started on 172.24.0.1:5000
+2026-04-11 00:02:20,040 - INFO - Client 1 (VEPVNZ) connected from ('172.24.0.1', 59722)
+2026-04-11 00:02:26,060 - INFO - Client 2 (LKSHQW) connected from ('172.24.0.1', 59758)
+2026-04-11 00:02:56,795 - ERROR - Client 2 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:02:56,796 - INFO - Client 2 (LKSHQW) disconnected
+2026-04-11 00:02:58,860 - ERROR - Client 1 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:02:58,861 - INFO - Client 1 (VEPVNZ) disconnected
+2026-04-11 00:03:57,866 - INFO - Client 3 (PTFFQQ) connected from ('172.24.0.1', 49484)
+2026-04-11 00:04:07,502 - INFO - Client 4 (XMDCBJ) connected from ('172.24.0.1', 49537)
+2026-04-11 00:04:11,732 - INFO - Message from 4 acknowledged
+2026-04-11 00:04:11,733 - INFO - Broadcast message from 4: пои
+2026-04-11 00:04:18,333 - INFO - Message from 3 acknowledged
+2026-04-11 00:04:18,334 - INFO - Broadcast message from 3: пипи
+2026-04-11 00:04:25,224 - ERROR - Client 3 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:04:25,225 - INFO - Client 3 (PTFFQQ) disconnected
+2026-04-11 00:04:30,091 - INFO - Client 5 (ILZPGK) connected from ('172.24.0.1', 49893)
+2026-04-11 00:04:33,143 - INFO - Message from 5 acknowledged
+2026-04-11 00:04:33,144 - INFO - Broadcast message from 5: ыва
+2026-04-11 00:04:41,111 - ERROR - Client 4 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:04:41,112 - INFO - Client 4 (XMDCBJ) disconnected
+2026-04-11 00:04:45,473 - INFO - Client 6 (AIIKZC) connected from ('172.24.0.1', 49977)
+2026-04-11 00:04:47,379 - INFO - Message from 6 acknowledged
+2026-04-11 00:04:47,379 - INFO - Broadcast message from 6: ываыва
+2026-04-11 00:04:54,478 - INFO - Message from 6 acknowledged
+2026-04-11 00:04:54,479 - INFO - Broadcast message from 6: ываыва
+2026-04-11 00:04:57,197 - INFO - Message from 5 acknowledged
+2026-04-11 00:04:57,198 - INFO - Broadcast message from 5: ываыва
+2026-04-11 00:05:20,668 - ERROR - Client 6 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:05:20,668 - INFO - Client 6 (AIIKZC) disconnected
+2026-04-11 00:05:21,600 - ERROR - Client 5 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:05:21,600 - INFO - Client 5 (ILZPGK) disconnected
+2026-04-11 00:05:35,479 - INFO - Client 7 (LRVSTY) connected from ('172.24.0.1', 50500)
+2026-04-11 00:05:40,792 - INFO - Client 8 (KLYWKL) connected from ('172.24.0.1', 50530)
+2026-04-11 00:05:53,541 - INFO - Message from 8 acknowledged
+2026-04-11 00:05:53,542 - INFO - Broadcast message from 8: ываыва
+2026-04-11 00:05:56,245 - INFO - Message from 7 acknowledged
+2026-04-11 00:05:56,246 - INFO - Broadcast message from 7: ываыва
+2026-04-11 00:06:01,520 - INFO - Message from 8 acknowledged
+2026-04-11 00:06:01,521 - INFO - Broadcast message from 8: ываыва
+2026-04-11 00:06:03,457 - INFO - Message from 7 acknowledged
+2026-04-11 00:06:03,458 - INFO - Broadcast message from 7: ываываы
+2026-04-11 00:06:08,698 - ERROR - Client 7 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:06:08,699 - INFO - Client 7 (LRVSTY) disconnected
+2026-04-11 00:06:10,004 - ERROR - Client 8 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-11 00:06:10,004 - INFO - Client 8 (KLYWKL) disconnected

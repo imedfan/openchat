@@ -91,7 +91,8 @@ class ChatServer:
                     
                     count_msg = json.dumps({
                         'type': 'participants',
-                        'count': participant_count
+                        'count': participant_count,
+                        'participants': [{'client_id': cid, 'username': self.client_usernames.get(cid, f'User {cid}')} for cid in self.clients.keys()]
                     })
                     self.broadcast(count_msg)
 
@@ -143,7 +144,8 @@ class ChatServer:
                 participant_count = len(self.clients)
                 count_msg = json.dumps({
                     'type': 'participants',
-                    'count': participant_count
+                    'count': participant_count,
+                    'participants': [{'client_id': cid, 'username': self.client_usernames.get(cid, f'User {cid}')} for cid in self.clients.keys()]
                 })
                 self.broadcast(count_msg)
                 logger.info(f"Client {client_id} ({username}) disconnected")

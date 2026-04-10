@@ -332,7 +332,16 @@ class ChatClient(App):
 
                 elif msg_type == 'participants':
                     count = message.get('count', 1)
-                    self.new_message_event.set()
+                    participants_list = message.get('participants', [])
+                    logger.info(f"Participants update received: count={count}, participants={participants_list}")
+                    self.participants = {}
+                    for p in participants_list:
+                        cid = p.get('client_id')
+                        username = p.get('username')
+                        if cid and username:
+                            self.participants[cid] = username
+                    logger.info(f"Participants updated: {self.participants}")
+                    self.call_from_thread(self.update_contacts_list)
 
             except Exception as e:
                 logger.error(f"Receive error: {e}")
@@ -400,19 +409,27 @@ class ChatClient(App):
             chat_screen = self.screen
             if isinstance(chat_screen, ChatScreen):
                 contacts_list = chat_screen.query_one("#contacts-list", ListView)
-                contacts_list.clear()
-
+                
+                current_ids = {item.id for item in contacts_list.children} if contacts_list.children else set()
+                new_ids = {f"user_{cid}" for cid in self.participants.keys()}
+                
+                for item in list(contacts_list.children):
+                    if item.id not in new_ids:
+                        item.remove()
+                
                 for client_id, username in self.participants.items():
-                    label = f"{username}" if username else f"User {client_id}"
-                    item = ListItem(Label(label))
-                    item.id = str(client_id)
-                    contacts_list.append(item)
+                    item_id = f"user_{client_id}"
+                    if item_id not in current_ids:
+                        label = f"{username}" if username else f"User {client_id}"
+                        item = ListItem(Label(label))
+                        item.id = item_id
+                        contacts_list.append(item)
         except Exception as e:
             logger.error(f"Contacts update error: {e}")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item and event.item.id:
-            contact_id = int(event.item.id)
+            contact_id = int(event.item.id.replace("user_", ""))
             self.current_contact = contact_id
             self.update_messages_display()
 
