@@ -12,8 +12,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('client.log'),
-        logging.StreamHandler()
+        logging.FileHandler('client.log')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -92,16 +91,17 @@ class TUI:
 """)
 
     @staticmethod
-    def print_messages(messages: list):
-        print(f"\n{TUI.GRAY}{'─'*60}{TUI.RESET}")
+    def print_messages(messages: list, my_id: int):
+        print(f"\n{TUI.GRAY}{'─'*62}{TUI.RESET}")
         for msg in messages:
+            sender = "You" if msg.is_mine or msg.client_id == my_id else f"User {msg.client_id}"
             if msg.is_mine:
-                color = TUI.WHITE if msg.acknowledged else TUI.GRAY
+                color = TUI.GREEN if msg.acknowledged else TUI.GRAY
                 ack_status = "✓" if msg.acknowledged else "..."
-                print(f"{color}[{msg.timestamp}] You: {msg.content} {ack_status}{TUI.RESET}")
+                print(f"{msg.timestamp} - {sender}: {msg.content} {color}{ack_status}{TUI.RESET}")
             else:
-                print(f"{TUI.CYAN}[{msg.timestamp}] User {msg.client_id}: {msg.content}{TUI.RESET}")
-        print(f"{TUI.GRAY}{'─'*60}{TUI.RESET}\n")
+                print(f"{msg.timestamp} - {sender}: {msg.content}")
+        print(f"{TUI.GRAY}{'─'*62}{TUI.RESET}\n")
 
     @staticmethod
     def print_system(message: str):
@@ -116,6 +116,7 @@ class ChatClient:
         self.pending_messages: Dict[str, Message] = {}
         self.message_id_counter = 0
         self.connected = False
+        self.new_message_event = threading.Event()
 
     def connect(self, host: str, port: int) -> bool:
         try:
@@ -159,6 +160,7 @@ class ChatClient:
                                 msg.acknowledged = True
                                 break
                         del self.pending_messages[msg_id]
+                        self.new_message_event.set()
                         logger.info(f"Message {msg_id} acknowledged")
                 
                 elif msg_type == 'message':
@@ -168,6 +170,7 @@ class ChatClient:
                     
                     msg = Message(content, is_mine=False, client_id=client_id, timestamp=timestamp)
                     self.messages.append(msg)
+                    self.new_message_event.set()
                     logger.info(f"Received message from user {client_id}: {content[:50]}")
                 
                 elif msg_type == 'system':
@@ -175,6 +178,7 @@ class ChatClient:
                     timestamp = message.get('timestamp', '')
                     msg = Message(content, is_mine=False, client_id=0, timestamp=timestamp)
                     self.messages.append(msg)
+                    self.new_message_event.set()
                     logger.info(f"System message: {content}")
                     
             except Exception as e:
@@ -202,6 +206,7 @@ class ChatClient:
                          acknowledged=False, message_id=message_id)
             self.messages.append(msg)
             self.pending_messages[message_id] = msg
+            self.new_message_event.set()
             
             self.socket.send(message.encode('utf-8'))
             logger.info(f"Sent message: {content[:50]}")
@@ -210,6 +215,17 @@ class ChatClient:
             logger.error(f"Send error: {e}")
             return False
 
+    def _display_loop(self):
+        while self.running:
+            self.new_message_event.wait(timeout=0.5)
+            if self.new_message_event.is_set():
+                self.new_message_event.clear()
+                if self.connected:
+                    TUI.clear_screen()
+                    TUI.print_chat_header(self.client_id, self.connected)
+                    TUI.print_messages(list(self.messages), self.client_id)
+                    print(f"\n{TUI.CYAN}>> {TUI.RESET}", end="")
+        
     def run(self):
         TUI.print_welcome()
         
@@ -224,10 +240,14 @@ class ChatClient:
         receive_thread.daemon = True
         receive_thread.start()
         
+        display_thread = threading.Thread(target=self._display_loop)
+        display_thread.daemon = True
+        display_thread.start()
+        
         while self.connected:
             TUI.clear_screen()
             TUI.print_chat_header(self.client_id, self.connected)
-            TUI.print_messages(list(self.messages))
+            TUI.print_messages(list(self.messages), self.client_id)
             
             try:
                 print(f"\n{TUI.CYAN}>> {TUI.RESET}", end="")

@@ -6,3 +6,52 @@
 2026-04-10 10:57:56,035 - INFO - Broadcast message from 1: ghbdtn
 2026-04-10 10:58:03,502 - INFO - Message from 1 acknowledged
 2026-04-10 10:58:03,503 - INFO - Broadcast message from 1: привет
+2026-04-10 10:59:12,895 - INFO - Client 2 connected from ('172.24.0.1', 55195)
+2026-04-10 10:59:15,005 - INFO - Message from 2 acknowledged
+2026-04-10 10:59:15,006 - INFO - Broadcast message from 2: ghbdtn
+2026-04-10 10:59:25,698 - INFO - Message from 2 acknowledged
+2026-04-10 10:59:25,699 - INFO - Broadcast message from 2: привет
+2026-04-10 11:04:39,549 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 11:04:58,095 - INFO - Client 1 connected from ('172.24.0.1', 53119)
+2026-04-10 11:05:02,739 - INFO - Message from 1 acknowledged
+2026-04-10 11:05:02,739 - INFO - Broadcast message from 1: привет
+2026-04-10 11:05:26,393 - INFO - Message from 1 acknowledged
+2026-04-10 11:05:26,393 - INFO - Broadcast message from 1: fsdf
+2026-04-10 11:05:49,822 - INFO - Client 2 connected from ('172.24.0.1', 53393)
+2026-04-10 11:05:54,127 - INFO - Message from 2 acknowledged
+2026-04-10 11:05:54,128 - INFO - Broadcast message from 2: привет
+2026-04-10 11:07:22,905 - ERROR - Client 1 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:07:22,906 - INFO - Client 1 disconnected
+2026-04-10 11:07:24,174 - ERROR - Client 2 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:07:24,174 - INFO - Client 2 disconnected
+2026-04-10 11:08:54,603 - INFO - Server stopped
+2026-04-10 11:08:58,964 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 11:09:09,605 - INFO - Client 1 connected from ('172.24.0.1', 64127)
+2026-04-10 11:09:16,416 - INFO - Client 2 connected from ('172.24.0.1', 64162)
+2026-04-10 11:09:18,156 - INFO - Message from 2 acknowledged
+2026-04-10 11:09:18,157 - INFO - Broadcast message from 2: привет
+2026-04-10 11:09:21,833 - INFO - Message from 1 acknowledged
+2026-04-10 11:09:21,833 - INFO - Broadcast message from 1: привет
+2026-04-10 11:09:30,729 - INFO - Message from 2 acknowledged
+2026-04-10 11:09:30,730 - INFO - Broadcast message from 2: привет
+2026-04-10 11:09:37,231 - INFO - Message from 1 acknowledged
+2026-04-10 11:09:37,231 - INFO - Broadcast message from 1: привет
+2026-04-10 11:09:49,524 - ERROR - Client 1 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:09:49,524 - INFO - Client 1 disconnected
+2026-04-10 11:09:50,422 - ERROR - Client 2 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:09:50,423 - INFO - Client 2 disconnected
+2026-04-10 11:10:58,089 - INFO - Server stopped
+2026-04-10 11:11:01,659 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 11:11:08,038 - INFO - Client 1 connected from ('172.24.0.1', 49528)
+2026-04-10 11:11:13,166 - INFO - Client 2 connected from ('172.24.0.1', 49555)
+2026-04-10 11:11:14,782 - INFO - Message from 2 acknowledged
+2026-04-10 11:11:14,783 - INFO - Broadcast message from 2: ghbdtn
+2026-04-10 11:11:17,376 - INFO - Message from 1 acknowledged
+2026-04-10 11:11:17,376 - INFO - Broadcast message from 1: ghbdtn
+2026-04-10 11:12:34,552 - ERROR - Client 2 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:12:34,553 - INFO - Client 2 disconnected
+2026-04-10 11:12:35,419 - ERROR - Client 1 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:12:35,420 - INFO - Client 1 disconnected
+2026-04-10 11:18:31,609 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 11:18:41,643 - INFO - Server stopped
+2026-04-10 11:19:03,064 - INFO - Server stopped

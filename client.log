@@ -3,3 +3,88 @@
 2026-04-10 10:57:56,034 - INFO - Message 1_1 acknowledged
 2026-04-10 10:58:03,502 - INFO - Sent message: привет
 2026-04-10 10:58:03,503 - INFO - Message 1_2 acknowledged
+2026-04-10 10:59:12,895 - INFO - Connected with ID: 2
+2026-04-10 10:59:12,895 - INFO - System message: User 2 joined the chat
+2026-04-10 10:59:15,005 - INFO - Sent message: ghbdtn
+2026-04-10 10:59:15,005 - INFO - Message 2_1 acknowledged
+2026-04-10 10:59:15,006 - INFO - Received message from user 2: ghbdtn
+2026-04-10 10:59:25,698 - INFO - Sent message: привет
+2026-04-10 10:59:25,699 - INFO - Message 2_2 acknowledged
+2026-04-10 10:59:25,699 - INFO - Received message from user 2: привет
+2026-04-10 11:03:54,817 - ERROR - Receive error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:03:54,817 - ERROR - Receive error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:04:58,095 - INFO - Connected with ID: 1
+2026-04-10 11:05:02,739 - INFO - Sent message: привет
+2026-04-10 11:05:02,739 - INFO - Message 1_1 acknowledged
+2026-04-10 11:05:22,012 - ERROR - Connection error: [WinError 10061] No connection could be made because the target machine actively refused it
+2026-04-10 11:05:26,392 - INFO - Sent message: fsdf
+2026-04-10 11:05:26,393 - INFO - Message 1_2 acknowledged
+2026-04-10 11:05:49,822 - INFO - Connected with ID: 2
+2026-04-10 11:05:49,823 - INFO - System message: User 2 joined the chat
+2026-04-10 11:05:54,127 - INFO - Sent message: привет
+2026-04-10 11:05:54,127 - INFO - Message 2_1 acknowledged
+2026-04-10 11:05:54,128 - INFO - Received message from user 2: привет
+2026-04-10 11:07:22,905 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
+2026-04-10 11:07:22,906 - INFO - Client disconnected
+2026-04-10 11:07:22,906 - INFO - System message: User 1 left the chat
+2026-04-10 11:07:24,174 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
+2026-04-10 11:07:24,174 - INFO - Client disconnected
+2026-04-10 11:08:54,615 - ERROR - Connection error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:09:09,605 - INFO - Connected with ID: 1
+2026-04-10 11:09:16,416 - INFO - Connected with ID: 2
+2026-04-10 11:09:16,417 - INFO - System message: User 2 joined the chat
+2026-04-10 11:09:18,156 - INFO - Sent message: привет
+2026-04-10 11:09:18,156 - INFO - Message 2_1 acknowledged
+2026-04-10 11:09:18,157 - INFO - Received message from user 2: привет
+2026-04-10 11:09:21,833 - INFO - Sent message: привет
+2026-04-10 11:09:21,833 - INFO - Message 1_1 acknowledged
+2026-04-10 11:09:21,834 - INFO - Received message from user 1: привет
+2026-04-10 11:09:30,728 - INFO - Sent message: привет
+2026-04-10 11:09:30,729 - INFO - Message 2_2 acknowledged
+2026-04-10 11:09:30,730 - INFO - Received message from user 2: привет
+2026-04-10 11:09:37,230 - INFO - Sent message: привет
+2026-04-10 11:09:37,231 - INFO - Message 1_2 acknowledged
+2026-04-10 11:09:37,232 - INFO - Received message from user 1: привет
+2026-04-10 11:09:49,523 - INFO - Client disconnected
+2026-04-10 11:09:49,524 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
+2026-04-10 11:09:49,524 - INFO - System message: User 1 left the chat
+2026-04-10 11:09:50,422 - INFO - Client disconnected
+2026-04-10 11:09:50,423 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
+2026-04-10 11:10:58,103 - ERROR - Connection error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:11:08,038 - INFO - Connected with ID: 1
+2026-04-10 11:11:13,166 - INFO - Connected with ID: 2
+2026-04-10 11:11:13,167 - INFO - System message: User 2 joined the chat
+2026-04-10 11:11:14,782 - INFO - Sent message: ghbdtn
+2026-04-10 11:11:14,782 - INFO - Message 2_1 acknowledged
+2026-04-10 11:11:14,783 - INFO - Received message from user 2: ghbdtn
+2026-04-10 11:11:17,375 - INFO - Sent message: ghbdtn
+2026-04-10 11:11:17,376 - INFO - Message 1_1 acknowledged
+2026-04-10 11:11:17,376 - INFO - Received message from user 1: ghbdtn
+2026-04-10 11:12:34,552 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
+2026-04-10 11:12:34,552 - INFO - Client disconnected
+2026-04-10 11:12:34,553 - INFO - System message: User 2 left the chat
+2026-04-10 11:12:35,419 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
+2026-04-10 11:12:35,419 - INFO - Client disconnected
+2026-04-10 11:18:41,655 - ERROR - Connection error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:19:03,076 - ERROR - Connection error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 11:19:27,061 - INFO - Connected with ID: 1
+2026-04-10 11:19:33,919 - INFO - Connected with ID: 2
+2026-04-10 11:19:33,920 - INFO - System message: User 2 joined the chat
+2026-04-10 11:19:35,333 - INFO - Sent message: fjbb
+2026-04-10 11:19:35,334 - INFO - Message 2_1 acknowledged
+2026-04-10 11:19:35,334 - INFO - Received message from user 2: fjbb
+2026-04-10 11:19:42,112 - INFO - Message 1_1 acknowledged
+2026-04-10 11:19:42,112 - INFO - Sent message: как сам
+2026-04-10 11:19:42,113 - INFO - Received message from user 1: как сам
+2026-04-10 11:19:47,322 - INFO - Sent message: да пойдет
+2026-04-10 11:19:47,322 - INFO - Message 2_2 acknowledged
+2026-04-10 11:19:47,323 - INFO - Received message from user 2: да пойдет
+2026-04-10 11:20:01,546 - INFO - Sent message: нихуя ты лют
+2026-04-10 11:20:01,546 - INFO - Message 2_3 acknowledged
+2026-04-10 11:20:01,547 - INFO - Received message from user 2: нихуя ты лют
+2026-04-10 11:20:07,237 - INFO - Sent message: да ты тож
+2026-04-10 11:20:07,237 - INFO - Message 1_2 acknowledged
+2026-04-10 11:20:07,238 - INFO - Received message from user 1: да ты тож
+2026-04-10 11:20:19,046 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
+2026-04-10 11:20:19,047 - INFO - Client disconnected
+2026-04-10 11:20:19,047 - INFO - System message: User 1 left the chat
