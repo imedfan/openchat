@@ -1,0 +1,8 @@
+[2026-04-10T10:53:34.331714] [INFO] Остановка сервера
+2026-04-10 10:53:46,339 - INFO - Server started on 10.97.240.31:5000
+2026-04-10 10:57:26,377 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 10:57:49,643 - INFO - Client 1 connected from ('172.24.0.1', 54163)
+2026-04-10 10:57:56,034 - INFO - Message from 1 acknowledged
+2026-04-10 10:57:56,035 - INFO - Broadcast message from 1: ghbdtn
+2026-04-10 10:58:03,502 - INFO - Message from 1 acknowledged
+2026-04-10 10:58:03,503 - INFO - Broadcast message from 1: привет
