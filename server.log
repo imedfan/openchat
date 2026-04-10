@@ -105,3 +105,34 @@
 2026-04-10 12:02:37,813 - INFO - Broadcast message from 2: ghbdtn
 2026-04-10 12:02:42,489 - INFO - Message from 1 acknowledged
 2026-04-10 12:02:42,490 - INFO - Broadcast message from 1: ghbdt
+2026-04-10 14:22:10,550 - INFO - Server started on 172.24.0.1:5000
+2026-04-10 14:23:51,737 - INFO - Client 1 (ва) connected from ('172.24.0.1', 57407)
+2026-04-10 14:23:52,526 - ERROR - Client 1 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 14:23:52,526 - INFO - Client 1 (ва) disconnected
+2026-04-10 14:25:38,622 - INFO - Client 2 (sds) connected from ('172.24.0.1', 49996)
+2026-04-10 14:25:39,431 - ERROR - Client 2 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 14:25:39,431 - INFO - Client 2 (sds) disconnected
+2026-04-10 14:26:40,023 - INFO - Client 3 (dfd) connected from ('172.24.0.1', 56639)
+2026-04-10 14:27:04,212 - INFO - Client 4 (dfd) connected from ('172.24.0.1', 56725)
+2026-04-10 14:27:21,681 - ERROR - Client 4 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 14:27:21,682 - INFO - Client 4 (dfd) disconnected
+2026-04-10 14:27:30,361 - ERROR - Client 3 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 14:27:30,361 - INFO - Client 3 (dfd) disconnected
+2026-04-10 14:32:03,888 - INFO - Client 5 (dffd) connected from ('172.24.0.1', 49277)
+2026-04-10 14:32:07,294 - INFO - Message from 5 acknowledged
+2026-04-10 14:32:07,294 - INFO - Broadcast message from 5: ljlgkfg
+2026-04-10 14:32:09,761 - INFO - Message from 5 acknowledged
+2026-04-10 14:32:09,762 - INFO - Broadcast message from 5: flgkd;fg
+2026-04-10 14:32:18,395 - INFO - Message from 5 acknowledged
+2026-04-10 14:32:18,396 - INFO - Broadcast message from 5: fgdfgjk
+2026-04-10 14:32:44,027 - INFO - Client 6 (aas172.24.0.1) connected from ('172.24.0.1', 61049)
+2026-04-10 14:32:47,581 - INFO - Message from 6 acknowledged
+2026-04-10 14:32:47,581 - INFO - Broadcast message from 6: kjdkldfs
+2026-04-10 14:32:56,979 - INFO - Message from 5 acknowledged
+2026-04-10 14:32:56,979 - INFO - Broadcast message from 5: ghgdjd
+2026-04-10 14:32:59,882 - INFO - Message from 6 acknowledged
+2026-04-10 14:32:59,883 - INFO - Broadcast message from 6: dfsdfkjsdfg
+2026-04-10 14:33:05,891 - ERROR - Client 5 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 14:33:05,891 - INFO - Client 5 (dffd) disconnected
+2026-04-10 14:33:07,400 - ERROR - Client 6 error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-10 14:33:07,401 - INFO - Client 6 (aas172.24.0.1) disconnected

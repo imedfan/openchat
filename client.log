@@ -158,3 +158,31 @@
 2026-04-10 12:04:47,882 - ERROR - Receive error: [WinError 10053] An established connection was aborted by the software in your host machine
 2026-04-10 12:04:47,882 - INFO - Client disconnected
 2026-04-10 12:04:47,883 - INFO - System message: RQOVIB left the chat
+2026-04-10 14:23:52,427 - INFO - Connected with ID: 1
+2026-04-10 14:25:39,239 - INFO - Connected with ID: 2
+2026-04-10 14:26:40,044 - INFO - Connected with ID: 3
+2026-04-10 14:27:04,222 - INFO - System message: dfd joined the chat
+2026-04-10 14:27:04,235 - INFO - Connected with ID: 4
+2026-04-10 14:27:21,685 - INFO - System message: dfd left the chat
+2026-04-10 14:32:03,907 - INFO - Connected with ID: 5
+2026-04-10 14:32:07,293 - INFO - Sent message: ljlgkfg
+2026-04-10 14:32:07,311 - INFO - Message 5_1 acknowledged
+2026-04-10 14:32:09,761 - INFO - Sent message: flgkd;fg
+2026-04-10 14:32:09,776 - INFO - Message 5_2 acknowledged
+2026-04-10 14:32:18,395 - INFO - Sent message: fgdfgjk
+2026-04-10 14:32:18,409 - INFO - Message 5_3 acknowledged
+2026-04-10 14:32:44,039 - INFO - System message: aas172.24.0.1 joined the chat
+2026-04-10 14:32:44,052 - INFO - Connected with ID: 6
+2026-04-10 14:32:47,580 - INFO - Sent message: kjdkldfs
+2026-04-10 14:32:47,587 - ERROR - Contacts update error: '5' is an invalid id; identifiers must contain only letters, numbers, underscores, or hyphens, and must not begin with a number.
+2026-04-10 14:32:47,587 - INFO - Received message from user 6: kjdkldfs
+2026-04-10 14:32:47,589 - INFO - Message 6_1 acknowledged
+2026-04-10 14:32:56,979 - INFO - Sent message: ghgdjd
+2026-04-10 14:32:56,989 - ERROR - Contacts update error: '6' is an invalid id; identifiers must contain only letters, numbers, underscores, or hyphens, and must not begin with a number.
+2026-04-10 14:32:56,989 - INFO - Received message from user 5: ghgdjd
+2026-04-10 14:32:56,990 - INFO - Message 5_4 acknowledged
+2026-04-10 14:32:59,882 - INFO - Sent message: dfsdfkjsdfg
+2026-04-10 14:32:59,895 - ERROR - Contacts update error: '5' is an invalid id; identifiers must contain only letters, numbers, underscores, or hyphens, and must not begin with a number.
+2026-04-10 14:32:59,896 - INFO - Received message from user 6: dfsdfkjsdfg
+2026-04-10 14:32:59,897 - INFO - Message 6_2 acknowledged
+2026-04-10 14:33:05,893 - INFO - System message: dffd left the chat
