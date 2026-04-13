@@ -4,10 +4,80 @@ Textual экраны: LoginScreen и ChatScreen.
 
 from textual.screen import Screen
 from textual.containers import Container, Horizontal
-from textual.widgets import Label, Input, Button, ListView, ListItem, TextArea
+from textual.widgets import Label, Input, Button, ListView, ListItem, TextArea, DataTable
 from textual.app import ComposeResult
+from textual.events import Key
 
 from common.protocol import DEFAULT_IP, DEFAULT_PORT
+from client.commands import registry
+
+
+# ── CommandInput ───────────────────────────────────────────
+
+class CommandInput(Input):
+    """Input с автодополнением команд при /."""
+
+    BINDINGS = [("tab", "autocomplete", "Autocomplete")]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._suggestions: Label | None = None
+        self._matches: list = []
+
+    def set_suggestions_label(self, widget: Label) -> None:
+        self._suggestions = widget
+
+    def _update_suggestions(self) -> None:
+        if not self._suggestions:
+            return
+
+        text = self.value
+        if not text.startswith("/"):
+            self._hide_suggestions()
+            return
+
+        parts = text[1:].split()
+        if len(parts) > 1:
+            self._hide_suggestions()
+            return
+
+        prefix = parts[0] if parts else ""
+        matches = registry.match_prefix(prefix)
+
+        if not matches:
+            self._hide_suggestions()
+            return
+
+        self._matches = matches
+        names = ", ".join(f"/{cmd.name}" for cmd in matches)
+        self._suggestions.update(names)
+        self._suggestions.styles.display = "block"
+
+    def _hide_suggestions(self) -> None:
+        if self._suggestions:
+            self._suggestions.styles.display = "none"
+        self._matches = []
+
+    def action_autocomplete(self) -> None:
+        if not self._matches:
+            return
+        if len(self._matches) == 1:
+            self.value = f"/{self._matches[0].name} "
+        else:
+            # Общий префикс
+            names = [cmd.name for cmd in self._matches]
+            prefix = ""
+            for chars in zip(*names):
+                if len(set(chars)) == 1:
+                    prefix += chars[0]
+                else:
+                    break
+            if prefix:
+                self.value = f"/{prefix}"
+        self._hide_suggestions()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._update_suggestions()
 
 
 # ── LoginScreen ────────────────────────────────────────────
@@ -88,6 +158,10 @@ class ChatScreen(Screen):
         background: $accent-darken-2;
     }
 
+    #contacts-list > ListItem.--highlight {
+        background: $accent;
+    }
+
     #chat-layout {
         width: 100%;
         height: 100%;
@@ -132,6 +206,16 @@ class ChatScreen(Screen):
         height: 1fr;
     }
 
+    #cmd-suggestions {
+        width: 100%;
+        height: auto;
+        background: $surface;
+        color: $text-muted;
+        padding: 0 2;
+        display: none;
+        dock: bottom;
+    }
+
     #message-input {
         width: 100%;
         dock: bottom;
@@ -140,16 +224,18 @@ class ChatScreen(Screen):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="chat-layout"):
-            # Левая панель — контакты
             with Container(id="contacts-panel"):
                 yield Label("Participants", id="contacts-header")
                 yield ListView(id="contacts-list")
 
-            # Правая панель — чат
             with Container(id="chat-panel"):
                 yield Label("General", id="chat-header-label")
                 yield TextArea(id="chat-messages", read_only=True)
-                yield Input(placeholder="Type a message...", id="message-input")
+                yield Label("", id="cmd-suggestions")
+                yield CommandInput(placeholder="Type a message...  /help for commands", id="message-input")
 
     def on_mount(self) -> None:
-        self.query_one("#message-input", Input).focus()
+        msg_input = self.query_one("#message-input", CommandInput)
+        sugg = self.query_one("#cmd-suggestions", Label)
+        msg_input.set_suggestions_label(sugg)
+        msg_input.focus()

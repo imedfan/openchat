@@ -2,6 +2,7 @@
 WebSocket-клиент: подключение, отправка, приём сообщений + E2EE для DM.
 """
 
+from datetime import datetime
 import asyncio
 import json
 import logging
@@ -41,6 +42,7 @@ class WSClient:
 
         self.private_key = None
         self.public_key_pem = None
+        self._receive_task: asyncio.Task | None = None
 
         self.participants: dict[int, dict] = {}   # client_id → {username, public_key_pem}
         self.shared_keys: dict[frozenset, bytes] = {}  # {my_id, their_id} → aes_key
@@ -83,8 +85,9 @@ class WSClient:
             chat_screen = ChatScreen()
             self.app.call_later(lambda: self.app.push_screen(chat_screen))
 
-            # Запуск receive-цикла (после push_screen!)
-            self.app.run_worker(self._receive_loop(), exclusive=True)
+            # Запуск receive-цикла как asyncio task (не worker — мы уже внутри worker'а!)
+            self._receive_task = asyncio.create_task(self._receive_loop())
+            logger.info("Receive loop started as asyncio task")
         else:
             self.app.notify("Connection failed", severity="error")
 
@@ -108,11 +111,17 @@ class WSClient:
 
     async def send_broadcast(self, content: str):
         payload, msg_id = make_message(content)
-        await self.websocket.send(payload)
+
+        try:
+            await self.websocket.send(payload)
+        except websockets.ConnectionClosed:
+            self.app.notify("Connection lost!", severity="error")
+            return
 
         from client.app import Message
         msg = Message(content, is_mine=True, client_id=self.client_id,
-                      username=self.username, message_id=msg_id)
+                      username=self.username, message_id=msg_id,
+                      timestamp=datetime.now().strftime("%H:%M"))
         self.messages.append(msg)
         self.pending_messages[msg_id] = msg
         self.app.call_later(self.app.update_messages_display)
@@ -120,6 +129,13 @@ class WSClient:
 
     async def send_direct(self, target_id: int, content: str):
         """DM: encrypt → send."""
+
+        # Проверяем что собеседник подключён
+        if target_id not in self.participants:
+            self.app.notify("User disconnected", severity="warning")
+            self.current_contact = None
+            return
+
         aes_key = self._get_shared_key(target_id)
         ciphertext_b64, nonce_b64 = encrypt_message(content, aes_key)
 
@@ -134,12 +150,16 @@ class WSClient:
             "message_id": msg_id,
         })
 
-        await self.websocket.send(direct_payload)
+        try:
+            await self.websocket.send(direct_payload)
+        except websockets.ConnectionClosed:
+            self.app.notify("Connection lost!", severity="error")
+            return
 
         from client.app import Message
         msg = Message(content, is_mine=True, client_id=self.client_id,
                       username=self.username, is_direct=True, target_id=target_id,
-                      message_id=msg_id)
+                      message_id=msg_id, timestamp=datetime.now().strftime("%H:%M"))
         self.messages.append(msg)
         self.pending_messages[msg_id] = msg
         self.app.call_later(self.app.update_messages_display)
@@ -152,6 +172,7 @@ class WSClient:
             async for raw_message in self.websocket:
                 message = json.loads(raw_message)
                 msg_type = message.get("type")
+                logger.info(f"Received msg type={msg_type}")
 
                 if msg_type == MSG_ACK:
                     self._handle_ack(message)
@@ -174,6 +195,14 @@ class WSClient:
             logger.error(f"Receive error: {e}")
 
         self.connected = False
+        # Очищаем participants при отключении (только себя оставляем)
+        self.participants = {}
+        if self.client_id:
+            self.participants[self.client_id] = {
+                "username": self.username,
+                "public_key_pem": self.public_key_pem,
+            }
+        self.app.call_later(self.app.update_contacts_list)
 
     def _handle_ack(self, message: dict):
         msg_id = message.get("message_id")
@@ -194,19 +223,14 @@ class WSClient:
         content = message.get("content", "")
         timestamp = message.get("timestamp", "")
 
-        # Обновляем participants
-        self.participants[client_id] = {
-            "username": username,
-            "public_key_pem": self.participants.get(client_id, {}).get("public_key_pem", b""),
-        }
-
         msg = Message(content, is_mine=False, client_id=client_id,
                       timestamp=timestamp, username=username)
         self.messages.append(msg)
         self.app.call_later(self.app.update_messages_display)
 
+        # Unread для General (ключ 0)
         if client_id != self.client_id:
-            self.unread_counts[client_id] = self.unread_counts.get(client_id, 0) + 1
+            self.unread_counts[0] = self.unread_counts.get(0, 0) + 1
             self.app.call_later(self.app.update_contacts_list)
 
         logger.info(f"Received broadcast from {client_id}: {content[:50]}")
@@ -219,12 +243,6 @@ class WSClient:
         nonce_b64 = message.get("nonce", "")
         timestamp = message.get("timestamp", "")
         target_id = message.get("target_id")
-
-        # Обновляем participants
-        self.participants[client_id] = {
-            "username": username,
-            "public_key_pem": self.participants.get(client_id, {}).get("public_key_pem", b""),
-        }
 
         # Decrypt
         try:
@@ -252,6 +270,7 @@ class WSClient:
         timestamp = message.get("timestamp", "")
         msg = Message(content, is_mine=False, client_id=0, timestamp=timestamp)
         self.messages.append(msg)
+        self.unread_counts[0] = self.unread_counts.get(0, 0) + 1
         self.app.call_later(self.app.update_messages_display)
         logger.info(f"System message: {content}")
 

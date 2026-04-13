@@ -81,7 +81,7 @@ class ChatServer:
                 msg_type = message.get("type")
 
                 if msg_type == MSG_CONNECT:
-                    await self._handle_connect(websocket, message)
+                    client_id = await self._handle_connect(websocket, message)
 
                 elif msg_type == MSG_MESSAGE:
                     await self._handle_broadcast(client_id, websocket, message)
@@ -123,6 +123,8 @@ class ChatServer:
 
         # Обновлённый participants остальным
         await self._send_participants_to_all(exclude=[client_id])
+
+        return client_id
 
     async def _handle_broadcast(self, client_id: int, websocket, message: dict):
         content = message.get("content", "")

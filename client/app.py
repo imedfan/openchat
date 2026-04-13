@@ -3,12 +3,14 @@ ChatApp — основной Textular App, оркестрация экранов
 """
 
 import logging
+import asyncio
 
 from textual.app import App
 from textual.widgets import Label, Input, ListView, ListItem, TextArea
 
-from client.screens import LoginScreen, ChatScreen
+from client.screens import LoginScreen, ChatScreen, CommandInput
 from client.ws_client import WSClient
+from client.commands import registry
 
 logger = logging.getLogger(__name__)
 
@@ -80,15 +82,13 @@ class ChatApp(App):
 
                 if self.ws.current_contact:
                     filtered = [msg for msg in self.ws.messages
-                                if (msg.client_id == self.ws.current_contact and not msg.is_direct) or
-                                   (msg.is_mine and (msg.target_id == self.ws.current_contact or not msg.is_direct)) or
-                                   (msg.is_direct and msg.client_id == self.ws.current_contact) or
-                                   (msg.is_direct and msg.is_mine and msg.target_id == self.ws.current_contact)]
+                                if (msg.client_id == self.ws.current_contact and msg.is_direct) or
+                                   (msg.is_mine and msg.target_id == self.ws.current_contact)]
                 else:
+                    # General: broadcast + system сообщения
                     filtered = [msg for msg in self.ws.messages
-                                if not msg.is_direct or
-                                   (msg.is_mine and not msg.is_direct) or
-                                   msg.client_id == 0]
+                                if msg.client_id == 0 or
+                                   not msg.is_direct]
 
                 lines = []
                 for msg in filtered:
@@ -104,6 +104,7 @@ class ChatApp(App):
 
                 messages_display.text = "\n".join(lines)
                 messages_display.scroll_end()
+                chat_screen.refresh()
         except Exception as e:
             logger.error(f"Display update error: {e}")
 
@@ -123,25 +124,61 @@ class ChatApp(App):
             logger.info(f"Others (excluding self): {others}")
 
             current_ids = {item.id for item in contacts_list.children} if contacts_list.children else set()
-            new_ids = {f"user_{cid}" for cid in others.keys()}
+            new_ids = {"general"} | {f"user_{cid}" for cid in others.keys()}
             logger.info(f"current_ids={current_ids}, new_ids={new_ids}")
 
+            # Удаляем элементы которых больше нет (кроме general)
             for item in list(contacts_list.children):
                 if item.id not in new_ids:
                     logger.info(f"Removing contact: {item.id}")
                     item.remove()
 
+            # General — всегда первый элемент (перемещаем в начало если уже есть)
+            general_unread = self.ws.unread_counts.get(0, 0)
+            general_label = "● General" if general_unread > 0 else "General"
+            general_is_highlight = self.ws.current_contact is None
+
+            if "general" in current_ids:
+                # Перемещаем general в начало
+                for child in contacts_list.children:
+                    if child.id == "general":
+                        child.query_one(Label).update(general_label)
+                        if general_unread > 0:
+                            child.add_class("unread")
+                        else:
+                            child.remove_class("unread")
+                        if general_is_highlight:
+                            child.add_class("--highlight")
+                        else:
+                            child.remove_class("--highlight")
+                        break
+            else:
+                general_item = ListItem(Label(general_label), id="general")
+                if general_unread > 0:
+                    general_item.add_class("unread")
+                if general_is_highlight:
+                    general_item.add_class("--highlight")
+                # Вставляем general первым
+                if contacts_list.children:
+                    contacts_list.children[0].remove()
+                    contacts_list.append(general_item)
+                else:
+                    contacts_list.append(general_item)
+                logger.info("Added: general")
+
+            # Контакты
             for client_id, data in others.items():
                 item_id = f"user_{client_id}"
+                is_highlight = self.ws.current_contact == client_id
                 if item_id not in current_ids:
                     unread = self.ws.unread_counts.get(client_id, 0)
                     username = data.get("username", f"User {client_id}")
-                    label = f"{username}" if username else f"User {client_id}"
-                    if unread > 0:
-                        label = f"● {label}"
+                    label = f"● {username}" if unread > 0 else username
                     item = ListItem(Label(label), id=item_id)
                     if unread > 0:
                         item.add_class("unread")
+                    if is_highlight:
+                        item.add_class("--highlight")
                     contacts_list.append(item)
                     logger.info(f"Added contact: {item_id} = {username}")
                 else:
@@ -149,16 +186,19 @@ class ChatApp(App):
                         if child.id == item_id:
                             unread = self.ws.unread_counts.get(client_id, 0)
                             username = data.get("username", f"User {client_id}")
-                            label = f"{username}" if username else f"User {client_id}"
-                            if unread > 0:
-                                label = f"● {label}"
+                            label = f"● {username}" if unread > 0 else username
                             child.query_one(Label).update(label)
                             if unread > 0:
                                 child.add_class("unread")
                             else:
                                 child.remove_class("unread")
+                            if is_highlight:
+                                child.add_class("--highlight")
+                            else:
+                                child.remove_class("--highlight")
                             break
             logger.info(f"Contacts list updated. Children: {[item.id for item in contacts_list.children]}")
+            chat_screen.refresh()
         except Exception as e:
             logger.error(f"Contacts update error: {e}", exc_info=True)
 
@@ -170,20 +210,82 @@ class ChatApp(App):
             if not content:
                 return
 
+            event.input.value = ""
+
+            # Проверяем команду
+            parsed = registry.parse(content)
+            if parsed:
+                cmd_name, cmd_args = parsed
+                self.run_worker(self._execute_command(cmd_name, cmd_args), exclusive=True)
+                return
+
+            # Обычное сообщение
             if self.ws.current_contact:
                 self.run_worker(self.ws.send_direct(self.ws.current_contact, content), exclusive=True)
             else:
                 self.run_worker(self.ws.send_broadcast(content), exclusive=True)
+                self.ws.unread_counts[0] = 0  # сброс unread при отправке в general
 
-            event.input.value = ""
+    async def _execute_command(self, cmd_name: str, args: list[str]) -> None:
+        """Выполнить команду и показать результат."""
+        cmd = registry.get(cmd_name)
+        if not cmd:
+            self.call_later(self._add_system_message, f"Unknown command: /{cmd_name}. Type /help for list.")
+            return
+
+        try:
+            result = await cmd.execute(self.ws, args)
+        except Exception as e:
+            result = f"Command error: {e}"
+
+        if result:
+            self.call_later(self._add_system_message, result)
+
+        # Обновить UI
+        self.call_later(self.update_messages_display)
+        self.call_later(self.update_contacts_list)
+        self.call_later(self.update_chat_header)
+
+    def _add_system_message(self, content: str) -> None:
+        """Добавить системное сообщение (результат команды)."""
+        from datetime import datetime
+        msg = Message(content, is_mine=False, client_id=0,
+                      timestamp=datetime.now().strftime("%H:%M"))
+        self.ws.messages.append(msg)
+
+    def on_worker_state_changed(self, event):
+        """Обрабатываем ошибки worker'ов — при ConnectionClosed возвращаем в General."""
+        if event.worker.state.name == "ERROR":
+            # Если отправка DM провалилась — сбрасываем контакт
+            self.ws.current_contact = None
+            self.update_messages_display()
+            self.update_contacts_list()
+            self.update_chat_header()
 
     # ── Выбор контакта ─────────────────────────────────────
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item and event.item.id:
-            contact_id = int(event.item.id.replace("user_", ""))
-            self.ws.current_contact = contact_id
-            self.ws.unread_counts[contact_id] = 0
+            if event.item.id == "general":
+                self.ws.current_contact = None
+            else:
+                contact_id = int(event.item.id.replace("user_", ""))
+                self.ws.current_contact = contact_id
+                self.ws.unread_counts[contact_id] = 0
+            self.ws.unread_counts[0] = 0  # сброс unread для general
+
+            # Highlight выбранного элемента
+            try:
+                chat_screen = self.screen
+                if isinstance(chat_screen, ChatScreen):
+                    contacts_list = chat_screen.query_one("#contacts-list", ListView)
+                    for child in contacts_list.children:
+                        child.remove_class("--highlight")
+                    if event.item:
+                        event.item.add_class("--highlight")
+            except Exception:
+                pass
+
             self.update_messages_display()
             self.update_contacts_list()
             self.update_chat_header()
