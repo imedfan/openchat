@@ -1,9 +1,9 @@
-import socket
-import threading
-import logging
+import asyncio
 import json
+import logging
+import socket
+import websockets
 from datetime import datetime
-from collections import defaultdict
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,166 +19,201 @@ class ChatServer:
     def __init__(self, host='0.0.0.0', port=5000):
         self.host = host
         self.port = port
-        self.server_socket = None
         self.clients = {}
-        self.client_addresses = {}
         self.client_usernames = {}
         self.client_id_counter = 1
-        self.running = False
-        self.lock = threading.Lock()
+        self.lock = asyncio.Lock()
 
-    def start(self):
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind((self.host, self.port))
-        self.server_socket.listen(5)
-        self.running = True
+    async def _get_participants_list(self):
+        return [
+            {'client_id': cid, 'username': self.client_usernames.get(cid, f'User {cid}')}
+            for cid in self.clients.keys()
+        ]
 
-        local_ip = socket.gethostbyname(socket.gethostname())
-        logger.info(f"Server started on {local_ip}:{self.port}")
-        print(f"\n{'='*50}")
-        print(f"  OpenChat Server")
-        print(f"{'='*50}")
-        print(f"  IP: {local_ip}")
-        print(f"  Port: {self.port}")
-        print(f"{'='*50}\n")
+    async def _send_participants_to_all(self, exclude=None):
+        exclude = exclude or []
+        async with self.lock:
+            participant_count = len(self.clients)
+            participants_list = await self._get_participants_list()
 
-        while self.running:
-            try:
-                client_socket, address = self.server_socket.accept()
-                thread = threading.Thread(target=self.handle_client, args=(client_socket, address))
-                thread.daemon = True
-                thread.start()
-            except Exception as e:
-                if self.running:
-                    logger.error(f"Accept error: {e}")
+        count_msg = json.dumps({
+            'type': 'participants',
+            'count': participant_count,
+            'participants': participants_list
+        })
 
-    def handle_client(self, client_socket, address):
+        async with self.lock:
+            targets = list(self.clients.items())
+
+        for client_id, client_ws in targets:
+            if client_id not in exclude:
+                try:
+                    await client_ws.send(count_msg)
+                except Exception as e:
+                    logger.error(f"Send participants error to {client_id}: {e}")
+
+    async def _send_participants_to(self, websocket):
+        async with self.lock:
+            participant_count = len(self.clients)
+            participants_list = await self._get_participants_list()
+
+        count_msg = json.dumps({
+            'type': 'participants',
+            'count': participant_count,
+            'participants': participants_list
+        })
+        await websocket.send(count_msg)
+
+    async def handle_client(self, websocket):
         client_id = None
         try:
-            while self.running:
-                data = client_socket.recv(4096)
-                if not data:
-                    break
-                
-                message = json.loads(data.decode('utf-8'))
+            async for raw_message in websocket:
+                message = json.loads(raw_message)
                 msg_type = message.get('type')
 
                 if msg_type == 'connect':
                     username = message.get('username', '')
-                    with self.lock:
+                    async with self.lock:
                         client_id = self.client_id_counter
-                        self.clients[client_id] = client_socket
-                        self.client_addresses[client_id] = address
+                        self.clients[client_id] = websocket
                         self.client_usernames[client_id] = username
                         self.client_id_counter += 1
                         participant_count = len(self.clients)
-                    
+
                     response = json.dumps({
                         'type': 'connected',
                         'client_id': client_id,
                         'participant_count': participant_count
                     })
-                    client_socket.send(response.encode('utf-8'))
-                    logger.info(f"Client {client_id} ({username}) connected from {address}")
+                    await websocket.send(response)
+                    logger.info(f"Client {client_id} ({username}) connected")
 
+                    # Send participants list directly to new client
+                    await self._send_participants_to(websocket)
+
+                    # Broadcast join notification to others
                     join_msg = json.dumps({
                         'type': 'system',
                         'message': f'{username} joined the chat',
                         'timestamp': datetime.now().strftime('%H:%M')
                     })
-                    self.broadcast(join_msg, exclude=[client_id])
-                    
-                    count_msg = json.dumps({
-                        'type': 'participants',
-                        'count': participant_count,
-                        'participants': [{'client_id': cid, 'username': self.client_usernames.get(cid, f'User {cid}')} for cid in self.clients.keys()]
-                    })
-                    self.broadcast(count_msg)
+                    await self.broadcast(join_msg, exclude=[client_id])
+
+                    # Broadcast updated participants to others
+                    await self._send_participants_to_all(exclude=[client_id])
 
                 elif msg_type == 'message':
                     content = message.get('content', '')
-                    with self.lock:
-                        sender_socket = self.clients.get(client_id)
+                    target_id = message.get('target_id')
+                    async with self.lock:
                         sender_username = self.client_usernames.get(client_id, f"User {client_id}")
-                    
-                    if sender_socket:
-                        ack = json.dumps({
-                            'type': 'ack',
-                            'message_id': message.get('message_id'),
-                            'username': sender_username
-                        })
-                        sender_socket.send(ack.encode('utf-8'))
-                        logger.info(f"Message from {client_id} acknowledged")
 
-                    broadcast_msg = json.dumps({
-                        'type': 'message',
-                        'client_id': client_id,
-                        'username': sender_username,
-                        'content': content,
-                        'timestamp': datetime.now().strftime('%H:%M')
+                    # ACK to sender
+                    ack = json.dumps({
+                        'type': 'ack',
+                        'message_id': message.get('message_id'),
+                        'username': sender_username
                     })
-                    self.broadcast(broadcast_msg, exclude=[client_id])
-                    logger.info(f"Broadcast message from {client_id}: {content[:50]}")
+                    await websocket.send(ack)
+                    logger.info(f"Message from {client_id} acknowledged")
 
+                    if target_id:
+                        # Direct message to specific client
+                        async with self.lock:
+                            target_ws = self.clients.get(target_id)
+                            target_username = self.client_usernames.get(target_id, f"User {target_id}")
+
+                        if target_ws:
+                            direct_msg = json.dumps({
+                                'type': 'direct',
+                                'client_id': client_id,
+                                'username': sender_username,
+                                'target_id': target_id,
+                                'content': content,
+                                'timestamp': datetime.now().strftime('%H:%M')
+                            })
+                            await target_ws.send(direct_msg)
+                            logger.info(f"Direct message from {client_id} to {target_id}: {content[:50]}")
+                        else:
+                            logger.warning(f"Target client {target_id} not found")
+                    else:
+                        # Broadcast to all except sender
+                        broadcast_msg = json.dumps({
+                            'type': 'message',
+                            'client_id': client_id,
+                            'username': sender_username,
+                            'content': content,
+                            'timestamp': datetime.now().strftime('%H:%M')
+                        })
+                        await self.broadcast(broadcast_msg, exclude=[client_id])
+                        logger.info(f"Broadcast message from {client_id}: {content[:50]}")
+
+        except websockets.ConnectionClosed:
+            logger.info(f"Client {client_id} connection closed")
         except Exception as e:
             logger.error(f"Client {client_id} error: {e}")
         finally:
             if client_id:
                 username = self.client_usernames.get(client_id, f"User {client_id}")
-                with self.lock:
-                    if client_id in self.clients:
-                        del self.clients[client_id]
-                    if client_id in self.client_addresses:
-                        del self.client_addresses[client_id]
-                    if client_id in self.client_usernames:
-                        del self.client_usernames[client_id]
-                
+                async with self.lock:
+                    self.clients.pop(client_id, None)
+                    self.client_usernames.pop(client_id, None)
+
                 leave_msg = json.dumps({
                     'type': 'system',
                     'message': f'{username} left the chat',
                     'timestamp': datetime.now().strftime('%H:%M')
                 })
-                self.broadcast(leave_msg)
-                
-                participant_count = len(self.clients)
-                count_msg = json.dumps({
-                    'type': 'participants',
-                    'count': participant_count,
-                    'participants': [{'client_id': cid, 'username': self.client_usernames.get(cid, f'User {cid}')} for cid in self.clients.keys()]
-                })
-                self.broadcast(count_msg)
+                await self.broadcast(leave_msg)
+
+                # Send updated participants to remaining clients
+                await self._send_participants_to_all()
                 logger.info(f"Client {client_id} ({username}) disconnected")
 
-            client_socket.close()
-
-    def broadcast(self, message, exclude=None):
+    async def broadcast(self, message, exclude=None):
         exclude = exclude or []
-        with self.lock:
-            for client_id, client_socket in list(self.clients.items()):
-                if client_id not in exclude:
-                    try:
-                        client_socket.send(message.encode('utf-8'))
-                    except Exception as e:
-                        logger.error(f"Broadcast error to {client_id}: {e}")
+        async with self.lock:
+            targets = list(self.clients.items())
 
-    def stop(self):
-        self.running = False
-        if self.server_socket:
-            self.server_socket.close()
-        logger.info("Server stopped")
+        for client_id, client_ws in targets:
+            if client_id not in exclude:
+                try:
+                    await client_ws.send(message)
+                except Exception as e:
+                    logger.error(f"Broadcast error to {client_id}: {e}")
 
-if __name__ == '__main__':
+    def start(self):
+        local_ip = socket.gethostbyname(socket.gethostname())
+        logger.info(f"Server starting on {local_ip}:{self.port}")
+        print(f"\n{'='*50}")
+        print(f"  OpenChat Server (WebSocket)")
+        print(f"{'='*50}")
+        print(f"  IP: {local_ip}")
+        print(f"  Port: {self.port}")
+        print(f"  ws://{local_ip}:{self.port}")
+        print(f"{'='*50}\n")
+
+        return websockets.serve(
+            self.handle_client,
+            self.host,
+            self.port,
+        )
+
+async def main():
     import sys
     port = 5000
     if len(sys.argv) > 1:
         port = int(sys.argv[1])
-    
+
     server = ChatServer(port=port)
+    async with server.start():
+        await asyncio.Future()  # run forever
+
+if __name__ == '__main__':
     try:
-        server.start()
+        asyncio.run(main())
     except KeyboardInterrupt:
-        server.stop()
+        logger.info("Server stopped")
         print(f"\n{'='*50}")
         print(f"  OpenChat Server shutting down...")
         print(f"  Goodbye! See you next time!")
