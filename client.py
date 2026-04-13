@@ -243,6 +243,7 @@ class ChatClient(App):
         self.connected = False
         self.new_message_event = threading.Event()
         self.participants: Dict[int, str] = {}
+        self.unread_counts: Dict[int, int] = {}
         self.current_contact: Optional[int] = None
 
     def on_mount(self) -> None:
@@ -318,7 +319,11 @@ class ChatClient(App):
                     self.messages.append(msg)
                     self.new_message_event.set()
                     self.call_from_thread(self.update_messages_display)
-                    self.call_from_thread(self.update_contacts_list)
+                    
+                    if client_id != self.client_id:
+                        self.unread_counts[client_id] = self.unread_counts.get(client_id, 0) + 1
+                        self.call_from_thread(self.update_contacts_list)
+                    
                     logger.info(f"Received message from user {client_id}: {content[:50]}")
 
                 elif msg_type == 'system':
@@ -420,10 +425,28 @@ class ChatClient(App):
                 for client_id, username in self.participants.items():
                     item_id = f"user_{client_id}"
                     if item_id not in current_ids:
+                        unread = self.unread_counts.get(client_id, 0)
                         label = f"{username}" if username else f"User {client_id}"
+                        if unread > 0:
+                            label = f"● {label}"
                         item = ListItem(Label(label))
                         item.id = item_id
+                        if unread > 0:
+                            item.styles.background = "dark blue"
                         contacts_list.append(item)
+                    else:
+                        for child in contacts_list.children:
+                            if child.id == item_id:
+                                unread = self.unread_counts.get(client_id, 0)
+                                label = f"{username}" if username else f"User {client_id}"
+                                if unread > 0:
+                                    label = f"● {label}"
+                                child.query_one(Label).update(label)
+                                if unread > 0:
+                                    child.styles.background = "dark blue"
+                                else:
+                                    child.styles.background = ""
+                                break
         except Exception as e:
             logger.error(f"Contacts update error: {e}")
 
@@ -431,7 +454,9 @@ class ChatClient(App):
         if event.item and event.item.id:
             contact_id = int(event.item.id.replace("user_", ""))
             self.current_contact = contact_id
+            self.unread_counts[contact_id] = 0
             self.update_messages_display()
+            self.update_contacts_list()
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "escape":
