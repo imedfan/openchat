@@ -218,14 +218,15 @@ class ChatServer:
     # ── Запуск ──────────────────────────────────────────────
 
     def start(self):
-        local_ip = socket.gethostbyname(socket.gethostname())
-        logger.info(f"Server starting on {local_ip}:{self.port}")
+        # Detect real non-loopback IP
+        local_ip = self._get_public_ip()
+        logger.info(f"Server starting on {self.host}:{self.port}")
         print(f"\n{'='*50}")
         print(f"  OpenChat Server (WebSocket)")
         print(f"{'='*50}")
-        print(f"  IP: {local_ip}")
-        print(f"  Port: {self.port}")
-        print(f"  ws://{local_ip}:{self.port}")
+        print(f"  Listening on: {self.host}:{self.port}")
+        print(f"  Public IP:    {local_ip}")
+        print(f"  Connect to:   ws://{local_ip}:{self.port}")
         print(f"{'='*50}\n")
 
         return websockets.serve(
@@ -233,3 +234,16 @@ class ChatServer:
             self.host,
             self.port,
         )
+
+    def _get_public_ip(self) -> str:
+        """Detect the server's public IP from network interfaces."""
+        try:
+            import socket
+            # Connect to an external address to detect our outgoing IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "0.0.0.0"
