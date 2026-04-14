@@ -4,11 +4,133 @@ Textual экраны: LoginScreen и ChatScreen.
 
 from textual.screen import Screen
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Label, Input, Button, ListView, ListItem, TextArea, DataTable, Tabs, Tab
+from textual.widgets import Label, Input, Button, ListView, ListItem, TextArea, DataTable, Tabs, Tab, Static
+from textual.widget import Widget
 from textual.app import ComposeResult
+from rich.text import Text
+from rich.style import Style
+import random
+import asyncio
 
 from common.protocol import DEFAULT_IP, DEFAULT_PORT
 from client.commands import registry
+
+
+# ── Banner: "OpenChat" block-art с градиентом и тенью ──────
+
+# Буквы как матрица 7×7 с использованием полных и полублоков
+# Для создания объёмного эффекта используем █ для основы и ░ для тени
+_BLOCK_FONTS = {
+    "O": [
+        "  ████  ",
+        " ██  ██ ",
+        "██    ██",
+        "██    ██",
+        "██    ██",
+        " ██  ██ ",
+        "  ████  ",
+    ],
+    "p": [
+        "██████  ",
+        "██   ██ ",
+        "██████  ",
+        "██      ",
+        "██      ",
+        "██      ",
+        "██      ",
+    ],
+    "e": [
+        " ██████ ",
+        "██      ",
+        "██      ",
+        "██████  ",
+        "██      ",
+        "██      ",
+        " ██████ ",
+    ],
+    "n": [
+        "███  ██ ",
+        "███  ██ ",
+        "████ ██ ",
+        "██ ███  ",
+        "██  ██  ",
+        "██   ██ ",
+        "██   ██ ",
+    ],
+    "C": [
+        " ██████ ",
+        "██    ██",
+        "██      ",
+        "██      ",
+        "██      ",
+        "██    ██",
+        " ██████ ",
+    ],
+    "h": [
+        "██      ",
+        "██      ",
+        "██████  ",
+        "██   ██ ",
+        "██    ██",
+        "██    ██",
+        "██    ██",
+    ],
+    "a": [
+        " ██████ ",
+        "██    ██",
+        "██    ██",
+        "████████",
+        "██    ██",
+        "██    ██",
+        "██    ██",
+    ],
+    "t": [
+        "   ██   ",
+        "  ████  ",
+        " █████  ",
+        "   ██   ",
+        "   ██   ",
+        "   ██   ",
+        "  ████  ",
+    ],
+}
+
+# Разделитель между буквами
+_BLOCK_SEP = "   "
+
+# Градиент: глубокий фиолетовый → розовый → оранжевый → золотой
+_GRADIENT_COLORS = [
+    (128, 0, 128),      # глубокий фиолетовый
+    (200, 50, 150),     # розовый
+    (255, 120, 50),     # оранжевый
+    (255, 200, 50),     # золотой
+]
+
+# Цвет тени
+_SHADOW_COLOR = (40, 40, 60)  # тёмно-синий/серый
+
+
+def _interpolate_color(colors, pos):
+    """Интерполяция цвета по позиции."""
+    if len(colors) <= 1:
+        return colors[0]
+    seg = pos * (len(colors) - 1)
+    idx = int(seg)
+    t = seg - idx
+    if idx >= len(colors) - 1:
+        return colors[-1]
+    c1 = colors[idx]
+    c2 = colors[idx + 1]
+    return (
+        int(c1[0] + (c2[0] - c1[0]) * t),
+        int(c1[1] + (c2[1] - c1[1]) * t),
+        int(c1[2] + (c2[2] - c1[2]) * t),
+    )
+
+
+def make_openchat_banner() -> Text:
+    """Создать простую текстовую надпись 'OpenChat'."""
+    return Text("OpenChat", Style(color="cyan", bold=True))
 
 
 # ── CommandOverlay ─────────────────────────────────────────
@@ -205,6 +327,183 @@ class CommandInput(Input):
                 return
 
 
+# ── NodeNetworkBackground ─────────────────────────────────
+
+class NodeNetworkBackground(Widget):
+    """Анимированный фон с узлами-точками, которые появляются, соединяются и исчезают."""
+
+    DEFAULT_CSS = """
+    NodeNetworkBackground {
+        width: 100%;
+        height: 100%;
+        opacity: 0.3;
+    }
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.nodes = []
+        self.connections = []
+        self.max_nodes = 20
+        self.max_connections = 30
+        self.update_interval = 0.35
+        # Цвета для узлов (от тёмного к светлому)
+        self.node_colors = [
+            (100, 100, 180),   # тёмно-синий
+            (140, 140, 220),   # синий
+            (180, 160, 255),   # светло-фиолетовый
+            (200, 180, 255),   # светлый фиолетовый
+            (220, 200, 255),   # очень светлый
+        ]
+
+    class Node:
+        def __init__(self, x, y):
+            self.x = x
+            self.y = y
+            self.life = 0.0  # 0→1→0 (появление→пик→исчезновение)
+            self.max_life = 1.0
+            self.speed = random.uniform(0.003, 0.008)
+            self.vx = random.uniform(-0.05, 0.05)
+            self.vy = random.uniform(-0.05, 0.05)
+
+        def update(self):
+            self.life += self.speed
+            self.x += self.vx
+            self.y += self.vy
+            # Отскок от краёв
+            if self.x < 0 or self.x > 1:
+                self.vx *= -1
+                self.x = max(0, min(1, self.x))
+            if self.y < 0 or self.y > 1:
+                self.vy *= -1
+                self.y = max(0, min(1, self.y))
+
+        @property
+        def is_alive(self):
+            return 0 < self.life < self.max_life
+
+        @property
+        def brightness(self):
+            # Плавное появление и затухание (колокол)
+            if self.life <= 0:
+                return 0
+            if self.life < 0.3:
+                return self.life / 0.3
+            if self.life > 0.7:
+                return (1.0 - self.life) / 0.3
+            return 1.0
+
+    def on_mount(self) -> None:
+        self.set_interval(self.update_interval, self.update_network)
+
+    def update_network(self) -> None:
+        """Обновить состояние сети узлов."""
+        # Обновляем существующие узлы
+        for node in self.nodes:
+            node.update()
+
+        # Удаляем мёртвые
+        self.nodes = [n for n in self.nodes if n.is_alive]
+
+        # Добавляем новые, если есть место
+        if len(self.nodes) < self.max_nodes and random.random() < 0.15:
+            self.nodes.append(self.Node(
+                x=random.uniform(0.1, 0.9),
+                y=random.uniform(0.1, 0.9)
+            ))
+
+        # Создаём соединения между близкими узлами
+        self.connections = []
+        connection_distance = 0.3
+        for i, n1 in enumerate(self.nodes):
+            for j, n2 in enumerate(self.nodes[i+1:], i+1):
+                dx = n1.x - n2.x
+                dy = n1.y - n2.y
+                dist = (dx*dx + dy*dy) ** 0.5
+                if dist < connection_distance:
+                    # Прозрачность линии зависит от яркости обоих узлов
+                    alpha = min(n1.brightness, n2.brightness) * (1 - dist / connection_distance)
+                    if alpha > 0.1:
+                        self.connections.append((n1, n2, alpha))
+
+        self.refresh()
+
+    def render(self):
+        """Отрисовать сеть узлов через ASCII-арт."""
+        width = self.size.width
+        height = self.size.height
+
+        if width <= 0 or height <= 0:
+            return Text("")
+
+        # Буфер: каждый элемент — (символ, Style или None)
+        buffer = [[(" ", None) for _ in range(width)] for _ in range(height)]
+
+        # Рисуем соединения (линии)
+        for n1, n2, alpha in self.connections:
+            x1, y1 = int(n1.x * (width - 1)), int(n1.y * (height - 1))
+            x2, y2 = int(n2.x * (width - 1)), int(n2.y * (height - 1))
+            self._draw_line(buffer, x1, y1, x2, y2, alpha)
+
+        # Рисуем узлы
+        for node in self.nodes:
+            x = int(node.x * (width - 1))
+            y = int(node.y * (height - 1))
+            if 0 <= x < width and 0 <= y < height:
+                brightness = node.brightness
+                color_idx = int(brightness * (len(self.node_colors) - 1))
+                r, g, b = self.node_colors[color_idx]
+                factor = 0.6 + brightness * 0.6
+                r = min(255, int(r * factor))
+                g = min(255, int(g * factor))
+                b = min(255, int(b * factor))
+                style = Style(color=f"rgb({r},{g},{b})")
+                # Не перезаписываем если уже есть что-то (линия)
+                if buffer[y][x][0] == " ":
+                    buffer[y][x] = ("●", style)
+
+        # Собираем в Text
+        result = Text()
+        for row in buffer:
+            for ch, style in row:
+                if style:
+                    result.append(ch, style)
+                else:
+                    result.append(ch)
+            result.append("\n")
+
+        return result
+
+    def _draw_line(self, buffer, x1, y1, x2, y2, alpha):
+        """Рисует линию между двумя точками с заданной прозрачностью."""
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        sx = 1 if x1 < x2 else -1
+        sy = 1 if y1 < y2 else -1
+        err = dx - dy
+
+        x, y = x1, y1
+        r = min(255, int(120 + alpha * 120))
+        g = min(255, int(120 + alpha * 120))
+        b = min(255, int(200 + alpha * 55))
+        style = Style(color=f"rgb({r},{g},{b})")
+
+        while True:
+            if 0 <= x < len(buffer[0]) and 0 <= y < len(buffer):
+                if buffer[y][x][0] == " ":
+                    buffer[y][x] = ("·", style)
+
+            if x == x2 and y == y2:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+
+
 # ── LoginScreen ────────────────────────────────────────────
 
 class LoginScreen(Screen):
@@ -212,20 +511,27 @@ class LoginScreen(Screen):
 
     CSS = """
     LoginScreen {
+        layers: background content;
         align: center middle;
     }
 
+    NodeNetworkBackground {
+        layer: background;
+        width: 100%;
+        height: 100%;
+    }
+
     #login-container {
-        width: 50;
+        layer: content;
+        width: 60;
         height: auto;
         padding: 2 4;
-        background: $surface;
+        background: $surface 80%;
         border: double $primary;
         layout: vertical;
     }
 
     #login-title {
-        text-style: bold;
         content-align: center middle;
         padding: 1 0;
         margin-bottom: 1;
@@ -247,8 +553,9 @@ class LoginScreen(Screen):
         self._on_connect = on_connect_callback
 
     def compose(self) -> ComposeResult:
+        yield NodeNetworkBackground()
         with Container(id="login-container"):
-            yield Label("OpenChat", id="login-title")
+            yield Static(make_openchat_banner(), id="login-title")
             yield Input(placeholder="Username", id="username-input")
             yield Input(placeholder="IP Address", id="ip-input", value=DEFAULT_IP)
             yield Input(placeholder="Port", id="port-input", value=str(DEFAULT_PORT))
