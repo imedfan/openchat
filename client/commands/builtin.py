@@ -154,6 +154,26 @@ class MeCommand(ChatCommand):
         return None  # сообщение отправлено, UI обновится
 
 
+# ── /exit ──────────────────────────────────────────────────
+
+class ExitCommand(ChatCommand):
+    @property
+    def name(self) -> str:
+        return "exit"
+
+    @property
+    def description(self) -> str:
+        return "Disconnect from server and return to login"
+
+    @property
+    def contexts(self) -> list[str]:
+        return ["general", "dm"]
+
+    async def execute(self, ws, args: list[str]) -> str | None:
+        ws.app.do_disconnect()
+        return None  # UI обновится отдельно
+
+
 # ── Регистрация ────────────────────────────────────────────
 
 def register_builtin_commands():
@@ -162,3 +182,4 @@ def register_builtin_commands():
     registry.register(UsersCommand())
     registry.register(DMCommand())
     registry.register(MeCommand())
+    registry.register(ExitCommand())

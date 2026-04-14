@@ -59,12 +59,42 @@ class ChatApp(App):
         uri = f"ws://{ip}:{port}"
         self.run_worker(self.ws.connect(uri, username), exclusive=True)
 
+    def do_disconnect(self) -> None:
+        """Отключиться от сервера и вернуться на LoginScreen."""
+        # Отменяем receive-цикл
+        if self.ws._receive_task and not self.ws._receive_task.done():
+            self.ws._receive_task.cancel()
+        # Закрываем WebSocket
+        if self.ws.websocket:
+            self.run_worker(self._close_websocket(), exclusive=True)
+        self.ws.running = False
+        self.ws.connected = False
+        self.ws.participants = {}
+        self.ws.messages = []
+        self.ws.pending_messages = {}
+        self.ws.unread_counts.clear()
+        self.ws.current_contact = None
+        # Показываем LoginScreen
+        self.call_later(self._show_login)
+
     def push_chat_screen(self) -> None:
         """Переключиться на ChatScreen и обновить overlay."""
         chat_screen = ChatScreen()
         self.push_screen(chat_screen)
         # После переключения обновим overlay
         self.call_later(self.refresh_command_overlay)
+
+    async def _close_websocket(self) -> None:
+        """Закрыть WebSocket соединение."""
+        try:
+            await self.ws.websocket.close()
+        except Exception:
+            pass
+
+    def _show_login(self) -> None:
+        """Показать LoginScreen поверх ChatScreen."""
+        login_screen = LoginScreen(self.do_connect)
+        self.push_screen(login_screen)
 
     # ── UI обновления ──────────────────────────────────────
 
