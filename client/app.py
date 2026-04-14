@@ -8,7 +8,7 @@ import asyncio
 from textual.app import App
 from textual.widgets import Label, Input, ListView, ListItem, TextArea
 
-from client.screens import LoginScreen, ChatScreen, CommandInput
+from client.screens import LoginScreen, ChatScreen, CommandInput, CommandOverlay
 from client.ws_client import WSClient
 from client.commands import registry
 
@@ -59,6 +59,13 @@ class ChatApp(App):
         uri = f"ws://{ip}:{port}"
         self.run_worker(self.ws.connect(uri, username), exclusive=True)
 
+    def push_chat_screen(self) -> None:
+        """Переключиться на ChatScreen и обновить overlay."""
+        chat_screen = ChatScreen()
+        self.push_screen(chat_screen)
+        # После переключения обновим overlay
+        self.call_later(self.refresh_command_overlay)
+
     # ── UI обновления ──────────────────────────────────────
 
     def update_chat_header(self) -> None:
@@ -71,6 +78,8 @@ class ChatApp(App):
                     header.update(f"DM: {uname}")
                 else:
                     header.update("General")
+                # Обновить overlay с новым контекстом
+                self.refresh_command_overlay()
         except Exception as e:
             logger.error(f"Header update error: {e}")
 
@@ -204,13 +213,58 @@ class ChatApp(App):
 
     # ── Ввод сообщений ─────────────────────────────────────
 
+    def refresh_command_overlay(self) -> None:
+        """Обновить overlay команд с учётом текущего контекста."""
+        try:
+            chat_screen = self.screen
+            if isinstance(chat_screen, ChatScreen):
+                msg_input = chat_screen.query_one("#message-input", CommandInput)
+                context = "dm" if self.ws.current_contact else "general"
+                msg_input._update_overlay(context)
+        except Exception as e:
+            logger.error(f"refresh_command_overlay error: {e}")
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "message-input":
             content = event.value.strip()
             if not content:
                 return
 
+            # Проверяем флаг подавления submit (после автокомплита из on_key)
+            try:
+                chat_screen = self.screen
+                if isinstance(chat_screen, ChatScreen):
+                    msg_input = chat_screen.query_one("#message-input", CommandInput)
+                    if msg_input._suppress_submit:
+                        msg_input._suppress_submit = False
+                        return  # Не отправлять — пользователь будет вводить аргументы
+            except Exception:
+                pass
+
             event.input.value = ""
+
+            # Скрываем overlay после отправки
+            try:
+                chat_screen = self.screen
+                if isinstance(chat_screen, ChatScreen):
+                    msg_input = chat_screen.query_one("#message-input", CommandInput)
+                    msg_input.hide_overlay()
+            except Exception:
+                pass
+
+            # /me — специальное сообщение (action)
+            if content.startswith("/me "):
+                action = content[4:].strip()
+                formatted = f"*{action}*"
+                if self.ws.current_contact:
+                    self.run_worker(self.ws.send_direct(self.ws.current_contact, formatted), exclusive=True)
+                else:
+                    self.run_worker(self.ws.send_broadcast(formatted), exclusive=True)
+                return
+            elif content == "/me":
+                self.call_later(self._add_system_message, "Usage: /me <action>")
+                self.call_later(self.update_messages_display)
+                return
 
             # Проверяем команду
             parsed = registry.parse(content)
@@ -230,7 +284,7 @@ class ChatApp(App):
         """Выполнить команду и показать результат."""
         cmd = registry.get(cmd_name)
         if not cmd:
-            self.call_later(self._add_system_message, f"Unknown command: /{cmd_name}. Type /help for list.")
+            self.call_later(self._add_system_message, f"Unknown command: /{cmd_name}. Type /command for list.")
             return
 
         try:
@@ -239,7 +293,11 @@ class ChatApp(App):
             result = f"Command error: {e}"
 
         if result:
-            self.call_later(self._add_system_message, result)
+            if cmd_name == "command":
+                # /command — добавить как сообщение в текущий чат
+                self.call_later(self._add_command_result_message, result)
+            else:
+                self.call_later(self._add_system_message, result)
 
         # Обновить UI
         self.call_later(self.update_messages_display)
@@ -251,6 +309,16 @@ class ChatApp(App):
         from datetime import datetime
         msg = Message(content, is_mine=False, client_id=0,
                       timestamp=datetime.now().strftime("%H:%M"))
+        self.ws.messages.append(msg)
+
+    def _add_command_result_message(self, content: str) -> None:
+        """Добавить результат команды /command как сообщение в текущий чат."""
+        from datetime import datetime
+        sender = self.ws.username if self.ws.username else "You"
+        msg = Message(content, is_mine=True, client_id=self.ws.client_id,
+                      username=sender, timestamp=datetime.now().strftime("%H:%M"),
+                      is_direct=bool(self.ws.current_contact),
+                      target_id=self.ws.current_contact)
         self.ws.messages.append(msg)
 
     def on_worker_state_changed(self, event):
@@ -289,6 +357,7 @@ class ChatApp(App):
             self.update_messages_display()
             self.update_contacts_list()
             self.update_chat_header()
+            self.refresh_command_overlay()
 
     def on_key(self, event) -> None:
         """Esc — вернуться к general chat."""
@@ -297,3 +366,4 @@ class ChatApp(App):
             self.update_messages_display()
             self.update_contacts_list()
             self.update_chat_header()
+            self.refresh_command_overlay()

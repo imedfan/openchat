@@ -5,19 +5,21 @@
 from client.commands import ChatCommand, registry
 
 
-# ── /help ──────────────────────────────────────────────────
+# ── /command ───────────────────────────────────────────────
 
-class HelpCommand(ChatCommand):
+class CommandCommand(ChatCommand):
     @property
     def name(self) -> str:
-        return "help"
+        return "command"
 
     @property
     def description(self) -> str:
         return "Show available commands"
 
     async def execute(self, ws, args: list[str]) -> str | None:
-        cmds = registry.list_all()
+        # Показываем команды текущего контекста
+        context = "dm" if ws.current_contact else "general"
+        cmds = registry.list_all(context)
         lines = ["Available commands:"]
         for cmd in cmds:
             lines.append(f"  {cmd.usage} — {cmd.description}")
@@ -33,11 +35,28 @@ class ClearCommand(ChatCommand):
 
     @property
     def description(self) -> str:
-        return "Clear chat history"
+        return "Clear current chat history"
+
+    @property
+    def contexts(self) -> list[str]:
+        return ["general", "dm"]
 
     async def execute(self, ws, args: list[str]) -> str | None:
-        ws.messages.clear()
-        ws.unread_counts.clear()
+        if ws.current_contact:
+            # DM: удалить сообщения текущего DM-чата
+            ws.messages = [
+                msg for msg in ws.messages
+                if not (
+                    (msg.is_direct and msg.client_id == ws.current_contact) or
+                    (msg.is_mine and msg.target_id == ws.current_contact)
+                )
+            ]
+        else:
+            # General: удалить broadcast и system сообщения
+            ws.messages = [
+                msg for msg in ws.messages
+                if msg.is_direct
+            ]
         return None  # тихо, UI обновится отдельно
 
 
@@ -51,6 +70,10 @@ class UsersCommand(ChatCommand):
     @property
     def description(self) -> str:
         return "Show online users"
+
+    @property
+    def contexts(self) -> list[str]:
+        return ["general"]
 
     async def execute(self, ws, args: list[str]) -> str | None:
         others = {cid: data for cid, data in ws.participants.items()
@@ -79,7 +102,14 @@ class DMCommand(ChatCommand):
     def usage(self) -> str:
         return "/dm <username>"
 
+    @property
+    def contexts(self) -> list[str]:
+        return ["general"]
+
     async def execute(self, ws, args: list[str]) -> str | None:
+        if ws.current_contact:
+            return "Already in a DM chat. Use Esc to return to General."
+
         if not args:
             return "Usage: /dm <username>"
 
@@ -102,22 +132,32 @@ class MeCommand(ChatCommand):
 
     @property
     def description(self) -> str:
-        return "Send action message"
+        return "Send an action message in italic"
 
     @property
     def usage(self) -> str:
         return "/me <action>"
 
+    @property
+    def contexts(self) -> list[str]:
+        return ["general", "dm"]
+
     async def execute(self, ws, args: list[str]) -> str | None:
         if not args:
             return "Usage: /me <action>"
-        return None  # обрабатывается отдельно в UI
+        # Отправляем как обычное сообщение с пометкой
+        content = " ".join(args)
+        if ws.current_contact:
+            await ws.send_direct(ws.current_contact, f"/me {content}")
+        else:
+            await ws.send_broadcast(f"/me {content}")
+        return None  # сообщение отправлено, UI обновится
 
 
 # ── Регистрация ────────────────────────────────────────────
 
 def register_builtin_commands():
-    registry.register(HelpCommand())
+    registry.register(CommandCommand())
     registry.register(ClearCommand())
     registry.register(UsersCommand())
     registry.register(DMCommand())

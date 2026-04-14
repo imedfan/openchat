@@ -25,6 +25,11 @@ class ChatCommand(ABC):
         """Пример использования. По умолчанию /name."""
         return f"/{self.name}"
 
+    @property
+    def contexts(self) -> list[str]:
+        """Контексты, в которых доступна команда: 'general' и/или 'dm'."""
+        return ["general", "dm"]
+
     @abstractmethod
     async def execute(self, ws, args: list[str]) -> str | None:
         """
@@ -48,8 +53,11 @@ class CommandRegistry:
     def get(self, name: str) -> ChatCommand | None:
         return self._commands.get(name.lower())
 
-    def list_all(self) -> list[ChatCommand]:
-        return sorted(self._commands.values(), key=lambda c: c.name)
+    def list_all(self, context: str | None = None) -> list[ChatCommand]:
+        cmds = sorted(self._commands.values(), key=lambda c: c.name)
+        if context:
+            cmds = [c for c in cmds if context in c.contexts]
+        return cmds
 
     def parse(self, text: str) -> tuple[str, list[str]] | None:
         """
@@ -69,11 +77,11 @@ class CommandRegistry:
         cmd_args = parts[1:]
         return cmd_name, cmd_args
 
-    def match_prefix(self, prefix: str) -> list[ChatCommand]:
-        """Найти команды начинающиеся с prefix."""
+    def match_prefix(self, prefix: str, context: str | None = None) -> list[ChatCommand]:
+        """Найти команды начинающиеся с prefix, с фильтрацией по контексту."""
         prefix = prefix.lower().lstrip("/")
         return [
-            cmd for cmd in self.list_all()
+            cmd for cmd in self.list_all(context)
             if cmd.name.startswith(prefix)
         ]
 

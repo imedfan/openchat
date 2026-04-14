@@ -81,9 +81,7 @@ class WSClient:
             self.app.notify(f"Connected as {username}")
 
             # Переключаемся на ChatScreen (через call_later — из worker'а нельзя напрямую)
-            from client.screens import ChatScreen
-            chat_screen = ChatScreen()
-            self.app.call_later(lambda: self.app.push_screen(chat_screen))
+            self.app.call_later(self.app.push_chat_screen)
 
             # Запуск receive-цикла как asyncio task (не worker — мы уже внутри worker'а!)
             self._receive_task = asyncio.create_task(self._receive_loop())

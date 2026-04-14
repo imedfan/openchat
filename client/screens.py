@@ -3,68 +3,146 @@ Textual экраны: LoginScreen и ChatScreen.
 """
 
 from textual.screen import Screen
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Label, Input, Button, ListView, ListItem, TextArea, DataTable
 from textual.app import ComposeResult
-from textual.events import Key
 
 from common.protocol import DEFAULT_IP, DEFAULT_PORT
 from client.commands import registry
 
 
-# ── CommandInput ───────────────────────────────────────────
+# ── CommandOverlay ─────────────────────────────────────────
 
-class CommandInput(Input):
-    """Input с автодополнением команд при /."""
+class CommandOverlay(Vertical):
+    """Overlay-окно со списком команд в стиле /cmd : description."""
 
-    BINDINGS = [("tab", "autocomplete", "Autocomplete")]
+    DEFAULT_CSS = """
+    CommandOverlay {
+        width: 100%;
+        height: auto;
+        max-height: 12;
+        background: $surface;
+        border: solid $primary;
+        display: none;
+        dock: bottom;
+    }
+    CommandOverlay #cmd-listview {
+        width: 100%;
+        height: 1fr;
+    }
+    CommandOverlay #cmd-listview > ListItem.--highlight {
+        background: $accent;
+        color: $text;
+    }
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._suggestions: Label | None = None
+        self._selected_index: int = 0
+        self._commands: list = []
+
+    def compose(self) -> ComposeResult:
+        yield ListView(id="cmd-listview")
+
+    def update_commands(self, commands: list) -> None:
+        """Обновить список команд в overlay."""
+        lv = self.query_one("#cmd-listview", ListView)
+        # Очищаем текущие элементы
+        for child in list(lv.children):
+            child.remove()
+
+        self._commands = commands
+
+        if not commands:
+            self.styles.display = "none"
+            return
+
+        for cmd in commands:
+            text = f"/{cmd.name}  \u2014  {cmd.description}"
+            item = ListItem(Label(text))
+            lv.append(item)
+
+        self.styles.display = "block"
+        self._selected_index = 0
+        # Выделяем первый элемент
+        try:
+            lv.index = 0
+        except Exception:
+            pass
+        self.refresh()
+
+    def get_selected_command_name(self) -> str | None:
+        """Вернуть имя выбранной команды."""
+        lv = self.query_one("#cmd-listview", ListView)
+        # Синхронизируем индекс с реальным состоянием ListView
+        try:
+            current_idx = lv.index
+        except Exception:
+            current_idx = 0
+        self._selected_index = current_idx
+
+        if self._commands and 0 <= current_idx < len(self._commands):
+            return self._commands[current_idx].name
+        return None
+
+    def hide_overlay(self) -> None:
+        self.styles.display = "none"
+        self._selected_index = 0
+
+
+# ── CommandInput ───────────────────────────────────────────
+
+class CommandInput(Input):
+    """Input с overlay-окном команд при /."""
+
+    BINDINGS = [
+        ("tab", "autocomplete", "Autocomplete"),
+    ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._overlay: CommandOverlay | None = None
         self._matches: list = []
+        self._suppress_submit: bool = False
 
-    def set_suggestions_label(self, widget: Label) -> None:
-        self._suggestions = widget
+    def set_overlay(self, widget: CommandOverlay) -> None:
+        self._overlay = widget
 
-    def _update_suggestions(self) -> None:
-        if not self._suggestions:
+    def _update_overlay(self, context: str | None = None) -> None:
+        if not self._overlay:
             return
 
         text = self.value
         if not text.startswith("/"):
-            self._hide_suggestions()
+            self._overlay.hide_overlay()
             return
 
         parts = text[1:].split()
-        if len(parts) > 1:
-            self._hide_suggestions()
-            return
-
-        prefix = parts[0] if parts else ""
-        matches = registry.match_prefix(prefix)
-
-        if not matches:
-            self._hide_suggestions()
-            return
+        if len(parts) == 0:
+            # Только / — показать все команды контекста
+            matches = registry.list_all(context)
+        else:
+            prefix = parts[0]
+            matches = registry.match_prefix(prefix, context)
 
         self._matches = matches
-        names = ", ".join(f"/{cmd.name}" for cmd in matches)
-        self._suggestions.update(names)
-        self._suggestions.styles.display = "block"
-
-    def _hide_suggestions(self) -> None:
-        if self._suggestions:
-            self._suggestions.styles.display = "none"
-        self._matches = []
+        self._overlay.update_commands(matches)
 
     def action_autocomplete(self) -> None:
+        """Tab: выбрать команду из overlay или дописать префикс."""
+        if self._overlay and self._overlay.styles.display != "none":
+            cmd_name = self._overlay.get_selected_command_name()
+            if cmd_name:
+                self.value = f"/{cmd_name} "
+                self._overlay.hide_overlay()
+                return
+
+        # Fallback: как раньше — общий префикс
         if not self._matches:
             return
         if len(self._matches) == 1:
             self.value = f"/{self._matches[0].name} "
         else:
-            # Общий префикс
             names = [cmd.name for cmd in self._matches]
             prefix = ""
             for chars in zip(*names):
@@ -74,10 +152,57 @@ class CommandInput(Input):
                     break
             if prefix:
                 self.value = f"/{prefix}"
-        self._hide_suggestions()
+
+    def hide_overlay(self) -> None:
+        if self._overlay:
+            self._overlay.hide_overlay()
+
+    def _update_overlay_from_parent(self) -> None:
+        """Определить контекст из родительского экрана и обновить overlay."""
+        try:
+            parent = self.screen
+            ws = parent.app.ws
+            context = "dm" if ws.current_contact else "general"
+            self._update_overlay(context)
+        except Exception:
+            pass
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        self._update_suggestions()
+        self._update_overlay_from_parent()
+
+    def on_key(self, event) -> None:
+        """Обработка клавиш: стрелки для overlay, Esc для закрытия, Enter для автокомплита."""
+        if self._overlay and self._overlay.styles.display != "none":
+            if event.key == "up":
+                lv = self._overlay.query_one("#cmd-listview", ListView)
+                if lv.children and lv.index > 0:
+                    lv.index = lv.index - 1
+                event.prevent_default()
+                return
+            elif event.key == "down":
+                lv = self._overlay.query_one("#cmd-listview", ListView)
+                if lv.children and lv.index < len(lv.children) - 1:
+                    lv.index = lv.index + 1
+                event.prevent_default()
+                return
+            elif event.key == "enter":
+                # Проверяем: если текст — только команда (без аргументов) → автокомплит
+                text = self.value
+                parts = text[1:].split()
+                if len(parts) <= 1:
+                    # Нет аргументов → вставляем команду, блокируем submit
+                    cmd_name = self._overlay.get_selected_command_name()
+                    if cmd_name:
+                        self.value = f"/{cmd_name} "
+                        self.cursor_position = len(self.value)
+                        self._suppress_submit = True
+                        event.prevent_default()
+                    return
+                # Есть аргументы → пропускаем Enter (отправка)
+            elif event.key == "escape":
+                self._overlay.hide_overlay()
+                event.prevent_default()
+                return
 
 
 # ── LoginScreen ────────────────────────────────────────────
@@ -206,12 +331,12 @@ class ChatScreen(Screen):
         height: 1fr;
     }
 
-    #cmd-suggestions {
+    #command-overlay {
         width: 100%;
         height: auto;
+        max-height: 40%;
         background: $surface;
-        color: $text-muted;
-        padding: 0 2;
+        border: solid $primary;
         display: none;
         dock: bottom;
     }
@@ -231,11 +356,11 @@ class ChatScreen(Screen):
             with Container(id="chat-panel"):
                 yield Label("General", id="chat-header-label")
                 yield TextArea(id="chat-messages", read_only=True)
-                yield Label("", id="cmd-suggestions")
+                yield CommandOverlay(id="command-overlay")
                 yield CommandInput(placeholder="Type a message...  /help for commands", id="message-input")
 
     def on_mount(self) -> None:
         msg_input = self.query_one("#message-input", CommandInput)
-        sugg = self.query_one("#cmd-suggestions", Label)
-        msg_input.set_suggestions_label(sugg)
+        overlay = self.query_one("#command-overlay", CommandOverlay)
+        msg_input.set_overlay(overlay)
         msg_input.focus()
