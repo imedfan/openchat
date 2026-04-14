@@ -6,7 +6,7 @@ import logging
 import asyncio
 
 from textual.app import App
-from textual.widgets import Label, Input, ListView, ListItem, TextArea
+from textual.widgets import Label, Input, ListView, ListItem, TextArea, Tabs, Tab, Button
 
 from client.screens import LoginScreen, ChatScreen, CommandInput, CommandOverlay
 from client.ws_client import WSClient
@@ -68,16 +68,73 @@ class ChatApp(App):
 
     # ── UI обновления ──────────────────────────────────────
 
+    # ── Управление вкладками чата ──────────────────────────
+
+    def get_chat_tab_id(self, contact_id: int | None) -> str:
+        """Вернуть ID вкладки для контакта."""
+        if contact_id is None:
+            return "tab-general"
+        return f"tab-dm-{contact_id}"
+
+    def add_chat_tab(self, contact_id: int | None) -> None:
+        """Создать вкладку для контакта или активировать существующую."""
+        try:
+            chat_screen = self.screen
+            if not isinstance(chat_screen, ChatScreen):
+                return
+            chat_tabs = chat_screen.query_one("#chat-tabs", Tabs)
+            tab_id = self.get_chat_tab_id(contact_id)
+
+            # Если вкладка уже есть — активируем
+            if tab_id in [t.id for t in chat_tabs.query("Tab")]:
+                chat_tabs.active = tab_id
+                return
+
+            # Создаём новую вкладку
+            if contact_id is None:
+                # General — не должно происходить, но на всякий случай
+                chat_tabs.active = "tab-general"
+                return
+
+            uname = self.ws.participants.get(contact_id, {}).get("username", f"User {contact_id}")
+            chat_tabs.add_tab(Tab(uname, id=tab_id))
+            chat_tabs.active = tab_id
+        except Exception as e:
+            logger.error(f"add_chat_tab error: {e}")
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        """При активации вкладки переключаем контекст чата."""
+        if not event.tab:
+            return
+
+        tab_id = event.tab.id
+        if tab_id == "tab-general":
+            self.ws.current_contact = None
+        elif tab_id and tab_id.startswith("tab-dm-"):
+            contact_id = int(tab_id.replace("tab-dm-", ""))
+            self.ws.current_contact = contact_id
+            self.ws.unread_counts[contact_id] = 0
+
+        self.ws.unread_counts[0] = 0
+        self.update_messages_display()
+        self.update_contacts_list()
+        self.refresh_command_overlay()
+
     def update_chat_header(self) -> None:
+        """Обновить название активной DM-вкладки (при смене имени)."""
         try:
             chat_screen = self.screen
             if isinstance(chat_screen, ChatScreen):
-                header = chat_screen.query_one("#chat-header-label", Label)
+                chat_tabs = chat_screen.query_one("#chat-tabs", Tabs)
                 if self.ws.current_contact:
+                    tab_id = self.get_chat_tab_id(self.ws.current_contact)
                     uname = self.ws.participants.get(self.ws.current_contact, {}).get("username", "Unknown")
-                    header.update(f"DM: {uname}")
-                else:
-                    header.update("General")
+                    try:
+                        tab = chat_tabs.get_tab(tab_id)
+                        if tab:
+                            tab.label = uname
+                    except Exception:
+                        pass
                 # Обновить overlay с новым контекстом
                 self.refresh_command_overlay()
         except Exception as e:
@@ -336,10 +393,12 @@ class ChatApp(App):
         if event.item and event.item.id:
             if event.item.id == "general":
                 self.ws.current_contact = None
+                self.add_chat_tab(None)
             else:
                 contact_id = int(event.item.id.replace("user_", ""))
                 self.ws.current_contact = contact_id
                 self.ws.unread_counts[contact_id] = 0
+                self.add_chat_tab(contact_id)
             self.ws.unread_counts[0] = 0  # сброс unread для general
 
             # Highlight выбранного элемента
@@ -363,7 +422,36 @@ class ChatApp(App):
         """Esc — вернуться к general chat."""
         if event.key == "escape" and self.ws.current_contact:
             self.ws.current_contact = None
+            self.add_chat_tab(None)
+            self.ws.unread_counts[0] = 0
             self.update_messages_display()
             self.update_contacts_list()
             self.update_chat_header()
             self.refresh_command_overlay()
+
+    # ── Кнопка Send ───────────────────────────────────────
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "send-btn":
+            chat_screen = self.screen
+            if isinstance(chat_screen, ChatScreen):
+                msg_input = chat_screen.query_one("#message-input", Input)
+                content = msg_input.value.strip()
+                if not content:
+                    return
+                msg_input.value = ""
+                chat_screen._update_send_button_state()
+
+                # Скрываем overlay после отправки
+                try:
+                    cmd_input = chat_screen.query_one("#message-input", CommandInput)
+                    cmd_input.hide_overlay()
+                except Exception:
+                    pass
+
+                # Отправляем сообщение
+                if self.ws.current_contact:
+                    self.run_worker(self.ws.send_direct(self.ws.current_contact, content), exclusive=True)
+                else:
+                    self.run_worker(self.ws.send_broadcast(content), exclusive=True)
+                    self.ws.unread_counts[0] = 0

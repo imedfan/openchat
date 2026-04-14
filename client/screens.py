@@ -4,7 +4,7 @@ Textual экраны: LoginScreen и ChatScreen.
 
 from textual.screen import Screen
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Label, Input, Button, ListView, ListItem, TextArea, DataTable
+from textual.widgets import Label, Input, Button, ListView, ListItem, TextArea, DataTable, Tabs, Tab
 from textual.app import ComposeResult
 
 from common.protocol import DEFAULT_IP, DEFAULT_PORT
@@ -284,7 +284,7 @@ class ChatScreen(Screen):
     }
 
     #contacts-list > ListItem.--highlight {
-        background: $accent;
+        background: $primary;
     }
 
     #chat-layout {
@@ -297,15 +297,21 @@ class ChatScreen(Screen):
         width: 25;
         height: 100%;
         background: $surface-darken-1;
-        border-right: solid $primary;
+        border: round $primary;
         layout: vertical;
     }
 
     #contacts-header {
-        padding: 1 2;
+        width: 100%;
+        height: 1;
+        dock: top;
+        content-align: center middle;
+        text-align: center;
         text-style: bold;
         background: $primary;
         color: $text;
+        padding: 0;
+        margin: 0;
     }
 
     #contacts-list {
@@ -317,13 +323,12 @@ class ChatScreen(Screen):
         width: 1fr;
         height: 100%;
         layout: vertical;
+        border: round $primary;
     }
 
-    #chat-header-label {
-        padding: 1 2;
-        text-style: bold;
-        background: $primary;
-        color: $text;
+    #chat-tabs {
+        dock: top;
+        height: 1;
     }
 
     #chat-messages {
@@ -341,9 +346,20 @@ class ChatScreen(Screen):
         dock: bottom;
     }
 
-    #message-input {
+    #message-bar {
         width: 100%;
+        height: auto;
         dock: bottom;
+        layout: horizontal;
+    }
+
+    #message-input {
+        width: 1fr;
+    }
+
+    #send-btn {
+        width: auto;
+        margin: 0 1 0 0;
     }
     """
 
@@ -354,13 +370,33 @@ class ChatScreen(Screen):
                 yield ListView(id="contacts-list")
 
             with Container(id="chat-panel"):
-                yield Label("General", id="chat-header-label")
+                yield Tabs(
+                    Tab("General", id="tab-general"),
+                    id="chat-tabs",
+                )
                 yield TextArea(id="chat-messages", read_only=True)
                 yield CommandOverlay(id="command-overlay")
-                yield CommandInput(placeholder="Type a message...  /help for commands", id="message-input")
+                with Horizontal(id="message-bar"):
+                    yield CommandInput(placeholder="Type a message...  /help for commands", id="message-input")
+                    yield Button("Send", id="send-btn", variant="success")
 
     def on_mount(self) -> None:
         msg_input = self.query_one("#message-input", CommandInput)
         overlay = self.query_one("#command-overlay", CommandOverlay)
         msg_input.set_overlay(overlay)
         msg_input.focus()
+        # Установить начальное состояние кнопки (disabled когда поле пустое)
+        self._update_send_button_state()
+
+    def _update_send_button_state(self) -> None:
+        """Обновить состояние кнопки Send (disabled если поле пустое)."""
+        try:
+            msg_input = self.query_one("#message-input", Input)
+            send_btn = self.query_one("#send-btn", Button)
+            send_btn.disabled = not msg_input.value.strip()
+        except Exception:
+            pass
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "message-input":
+            self._update_send_button_state()
