@@ -4,6 +4,7 @@ ChatApp — основной Textular App, оркестрация экранов
 
 import logging
 import asyncio
+from typing import Optional, List
 
 from textual.app import App
 from textual.widgets import Label, Input, ListView, ListItem, TextArea, Tabs, Tab, Button
@@ -25,7 +26,7 @@ class Message:
 
     def __init__(self, content: str, is_mine: bool = False, client_id: int = 0,
                  timestamp: str = "", username: str = "", is_direct: bool = False,
-                 target_id: int | None = None, acknowledged: bool = False,
+                 target_id: Optional[int] = None, acknowledged: bool = False,
                  message_id: str = ""):
         self.content = content
         self.is_mine = is_mine
@@ -100,13 +101,13 @@ class ChatApp(App):
 
     # ── Управление вкладками чата ──────────────────────────
 
-    def get_chat_tab_id(self, contact_id: int | None) -> str:
+    def get_chat_tab_id(self, contact_id: Optional[int]) -> str:
         """Вернуть ID вкладки для контакта."""
         if contact_id is None:
             return "tab-general"
         return f"tab-dm-{contact_id}"
 
-    def add_chat_tab(self, contact_id: int | None) -> None:
+    def add_chat_tab(self, contact_id: Optional[int]) -> None:
         """Создать вкладку для контакта или активировать существующую."""
         try:
             chat_screen = self.screen
@@ -367,7 +368,7 @@ class ChatApp(App):
                 self.run_worker(self.ws.send_broadcast(content), exclusive=True)
                 self.ws.unread_counts[0] = 0  # сброс unread при отправке в general
 
-    async def _execute_command(self, cmd_name: str, args: list[str]) -> None:
+    async def _execute_command(self, cmd_name: str, args: List[str]) -> None:
         """Выполнить команду и показать результат."""
         cmd = registry.get(cmd_name)
         if not cmd:

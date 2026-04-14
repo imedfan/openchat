@@ -1,0 +1,19 @@
+# Logs
+*.log
+
+# PyInstaller
+dist/
+build/
+*.spec
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Qwen
+.qwen/
+qwen-code-export-*.md
+
+# Pytest
+.pytest_cache/

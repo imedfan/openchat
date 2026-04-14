@@ -8,6 +8,7 @@ import json
 import logging
 import socket
 from datetime import datetime
+from typing import Dict, List, Optional
 
 import websockets
 
@@ -24,15 +25,15 @@ class ChatServer:
     def __init__(self, host="0.0.0.0", port=5000):
         self.host = host
         self.port = port
-        self.clients: dict[int, websockets.ServerProtocol] = {}   # client_id → websocket
-        self.client_usernames: dict[int, str] = {}
-        self.client_public_keys: dict[int, bytes] = {}             # client_id → public_key_pem
+        self.clients: Dict[int, websockets.ServerProtocol] = {}   # client_id → websocket
+        self.client_usernames: Dict[int, str] = {}
+        self.client_public_keys: Dict[int, bytes] = {}             # client_id → public_key_pem
         self.client_id_counter = 1
         self.lock = asyncio.Lock()
 
     # ── Helpers ──────────────────────────────────────────────
 
-    async def _get_participants_list(self) -> list[dict]:
+    async def _get_participants_list(self) -> List[dict]:
         return [
             {
                 "client_id": cid,
@@ -42,7 +43,7 @@ class ChatServer:
             for cid in self.clients.keys()
         ]
 
-    async def _send_participants_to_all(self, exclude: list[int] | None = None):
+    async def _send_participants_to_all(self, exclude: Optional[List[int]] = None):
         """Рассылает обновлённый список участников всем (кроме exclude)."""
         exclude = exclude or []
         async with self.lock:
@@ -202,7 +203,7 @@ class ChatServer:
 
     # ── Broadcast ───────────────────────────────────────────
 
-    async def broadcast(self, message: str, exclude: list[int] | None = None):
+    async def broadcast(self, message: str, exclude: Optional[List[int]] = None):
         exclude = exclude or []
         async with self.lock:
             targets = list(self.clients.items())

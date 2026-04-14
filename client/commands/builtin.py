@@ -2,6 +2,8 @@
 Встроенные команды.
 """
 
+from typing import List, Optional
+
 from client.commands import ChatCommand, registry
 
 
@@ -16,7 +18,7 @@ class CommandCommand(ChatCommand):
     def description(self) -> str:
         return "Show available commands"
 
-    async def execute(self, ws, args: list[str]) -> str | None:
+    async def execute(self, ws, args: List[str]) -> Optional[str]:
         # Показываем команды текущего контекста
         context = "dm" if ws.current_contact else "general"
         cmds = registry.list_all(context)
@@ -38,10 +40,10 @@ class ClearCommand(ChatCommand):
         return "Clear current chat history"
 
     @property
-    def contexts(self) -> list[str]:
+    def contexts(self) -> List[str]:
         return ["general", "dm"]
 
-    async def execute(self, ws, args: list[str]) -> str | None:
+    async def execute(self, ws, args: List[str]) -> Optional[str]:
         if ws.current_contact:
             # DM: удалить сообщения текущего DM-чата
             ws.messages = [
@@ -72,10 +74,10 @@ class UsersCommand(ChatCommand):
         return "Show online users"
 
     @property
-    def contexts(self) -> list[str]:
+    def contexts(self) -> List[str]:
         return ["general"]
 
-    async def execute(self, ws, args: list[str]) -> str | None:
+    async def execute(self, ws, args: List[str]) -> Optional[str]:
         others = {cid: data for cid, data in ws.participants.items()
                   if cid != ws.client_id}
         if not others:
@@ -103,10 +105,10 @@ class DMCommand(ChatCommand):
         return "/dm <username>"
 
     @property
-    def contexts(self) -> list[str]:
+    def contexts(self) -> List[str]:
         return ["general"]
 
-    async def execute(self, ws, args: list[str]) -> str | None:
+    async def execute(self, ws, args: List[str]) -> Optional[str]:
         if ws.current_contact:
             return "Already in a DM chat. Use Esc to return to General."
 
@@ -139,10 +141,10 @@ class MeCommand(ChatCommand):
         return "/me <action>"
 
     @property
-    def contexts(self) -> list[str]:
+    def contexts(self) -> List[str]:
         return ["general", "dm"]
 
-    async def execute(self, ws, args: list[str]) -> str | None:
+    async def execute(self, ws, args: List[str]) -> Optional[str]:
         if not args:
             return "Usage: /me <action>"
         # Отправляем как обычное сообщение с пометкой
@@ -166,10 +168,10 @@ class ExitCommand(ChatCommand):
         return "Disconnect from server and return to login"
 
     @property
-    def contexts(self) -> list[str]:
+    def contexts(self) -> List[str]:
         return ["general", "dm"]
 
-    async def execute(self, ws, args: list[str]) -> str | None:
+    async def execute(self, ws, args: List[str]) -> Optional[str]:
         ws.app.do_disconnect()
         return None  # UI обновится отдельно
 

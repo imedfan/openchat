@@ -9,6 +9,7 @@ from textual.widget import Widget
 from textual.app import ComposeResult
 from rich.text import Text
 from rich.style import Style
+from typing import Optional, List
 import random
 import asyncio
 
@@ -193,7 +194,7 @@ class CommandOverlay(Vertical):
             pass
         self.refresh()
 
-    def get_selected_command_name(self) -> str | None:
+    def get_selected_command_name(self) -> Optional[str]:
         """Вернуть имя выбранной команды."""
         lv = self.query_one("#cmd-listview", ListView)
         # Синхронизируем индекс с реальным состоянием ListView
@@ -223,14 +224,14 @@ class CommandInput(Input):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._overlay: CommandOverlay | None = None
+        self._overlay: Optional[CommandOverlay] = None
         self._matches: list = []
         self._suppress_submit: bool = False
 
     def set_overlay(self, widget: CommandOverlay) -> None:
         self._overlay = widget
 
-    def _update_overlay(self, context: str | None = None) -> None:
+    def _update_overlay(self, context: Optional[str] = None) -> None:
         if not self._overlay:
             return
 

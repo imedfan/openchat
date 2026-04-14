@@ -5,6 +5,7 @@
 import json
 import uuid
 from datetime import datetime
+from typing import Optional
 
 # ── Константы ──────────────────────────────────────────────
 BUFFER_SIZE = 4096
@@ -40,7 +41,7 @@ def make_connected(client_id: int, participant_count: int) -> str:
     })
 
 
-def make_message(content: str, message_id: str | None = None) -> tuple[str, str]:
+def make_message(content: str, message_id: Optional[str] = None) -> tuple:
     msg_id = message_id or str(uuid.uuid4())
     return json.dumps({
         "type": MSG_MESSAGE,
@@ -50,7 +51,7 @@ def make_message(content: str, message_id: str | None = None) -> tuple[str, str]
 
 
 def make_direct_message(client_id: int, username: str, target_id: int,
-                        content: str, nonce: str, message_id: str | None = None) -> tuple[str, str]:
+                        content: str, nonce: str, message_id: Optional[str] = None) -> tuple:
     msg_id = message_id or str(uuid.uuid4())
     return json.dumps({
         "type": MSG_DIRECT,
@@ -71,7 +72,7 @@ def make_ack(message_id: str, username: str = "") -> str:
     })
 
 
-def make_system_message(message: str, timestamp: str | None = None) -> str:
+def make_system_message(message: str, timestamp: Optional[str] = None) -> str:
     return json.dumps({
         "type": MSG_SYSTEM,
         "message": message,

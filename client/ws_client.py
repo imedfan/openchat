@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from typing import Dict, Optional, FrozenSet
 
 import websockets
 
@@ -42,15 +43,15 @@ class WSClient:
 
         self.private_key = None
         self.public_key_pem = None
-        self._receive_task: asyncio.Task | None = None
+        self._receive_task: Optional[asyncio.Task] = None
 
-        self.participants: dict[int, dict] = {}   # client_id → {username, public_key_pem}
-        self.shared_keys: dict[frozenset, bytes] = {}  # {my_id, their_id} → aes_key
+        self.participants: Dict[int, dict] = {}   # client_id → {username, public_key_pem}
+        self.shared_keys: Dict[FrozenSet, bytes] = {}  # {my_id, their_id} → aes_key
 
         self.messages = []                 # список Message-объектов
         self.pending_messages = {}         # message_id → Message (ждём ack)
-        self.unread_counts: dict[int, int] = defaultdict(int)
-        self.current_contact: int | None = None
+        self.unread_counts: Dict[int, int] = defaultdict(int)
+        self.current_contact: Optional[int] = None
 
     # ── Подключение ─────────────────────────────────────────
 
