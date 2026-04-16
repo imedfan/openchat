@@ -144,14 +144,17 @@ func (c *LLMClient) readSSE(body io.ReadCloser, callback func(chunk string, done
 		}
 
 		choice := parsed.Choices[0]
-		if choice.FinishReason != "" {
-			callback("", true)
-			return nil
-		}
 
+		// Сначала отправляем чанк если есть контент (даже если finish_reason установлен)
 		content := choice.Delta.Content
 		if content != "" {
 			callback(content, false)
+		}
+
+		// Потом проверяем finish_reason — если установлен, завершаем
+		if choice.FinishReason != "" {
+			callback("", true)
+			return nil
 		}
 	}
 }

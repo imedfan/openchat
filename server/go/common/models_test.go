@@ -148,3 +148,28 @@ func TestLoadModels_MissingBaseURL(t *testing.T) {
 		t.Fatal("expected error for missing baseUrl, got nil")
 	}
 }
+
+func TestModelsReady_ValidModels(t *testing.T) {
+	models := []ModelConfig{
+		{ID: "m1", Name: "local", EnvKey: "K", BaseURL: "http://x/v1"},
+	}
+	if !ModelsReady(models) {
+		t.Fatal("expected ModelsReady to return true for valid models")
+	}
+}
+
+func TestModelsReady_EmptyArray(t *testing.T) {
+	models := []ModelConfig{}
+	if ModelsReady(models) {
+		t.Fatal("expected ModelsReady to return false for empty array")
+	}
+}
+
+func TestModelsReady_MissingField(t *testing.T) {
+	models := []ModelConfig{
+		{ID: "m1", Name: "local", EnvKey: "K"}, // missing BaseURL
+	}
+	if ModelsReady(models) {
+		t.Fatal("expected ModelsReady to return false for model with missing field")
+	}
+}

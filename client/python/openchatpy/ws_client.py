@@ -6,21 +6,25 @@ from datetime import datetime
 import asyncio
 import json
 import logging
+import os
 from collections import defaultdict
 from typing import Dict, Optional, FrozenSet
 
+import aiohttp
 import websockets
 
 from protocol import (
     MSG_CONNECT, MSG_CONNECTED, MSG_MESSAGE, MSG_DIRECT,
     MSG_ACK, MSG_SYSTEM, MSG_PARTICIPANTS,
     MSG_LLM_MODELS, MSG_LLM_CHUNK, MSG_LLM_ERROR,
-    make_connect, make_message, make_llm_request,
+    MSG_MODEL_MESSAGE, MSG_MODEL_RESPONSE,
+    make_connect, make_message, make_llm_request, make_model_message,
 )
 from crypto import (
     generate_keypair, load_public_key, derive_shared_key,
     encrypt_message, decrypt_message,
 )
+from model_loader import load_user_models, user_models_ready
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,11 @@ class WSClient:
         self.llm_streaming = False         # идёт ли сейчас streaming
         self.llm_callbacks: Dict[str, list] = {}  # model_id → [callback(chunk, done), ...]
 
+        # Модель-чаты (серверные + личные)
+        self.server_models: list = []      # [{"id": ..., "name": ...}, ...]
+        self.user_models: list = []         # [{"id": ..., "name": ...}, ...]
+        self.model_conversations: Dict[str, list] = {}  # model_id → [Message, ...]
+
     # ── Подключение ─────────────────────────────────────────
 
     async def connect(self, uri: str, username: str):
@@ -93,6 +102,14 @@ class WSClient:
             # Запуск receive-цикла как asyncio task (не worker — мы уже внутри worker'а!)
             self._receive_task = asyncio.create_task(self._receive_loop())
             logger.info("Receive loop started as asyncio task")
+
+            # Загружаем пользовательские модели
+            self.user_models = load_user_models()
+            if user_models_ready(self.user_models):
+                logger.info(f"Loaded {len(self.user_models)} user model(s)")
+
+            # Обновляем UI контактов
+            self.app.call_later(self.app.update_contacts_list)
         else:
             self.app.notify("Connection failed", severity="error")
 
@@ -173,6 +190,23 @@ class WSClient:
     # ── Цикл приёма ─────────────────────────────────────────
 
     async def _receive_loop(self):
+        # Настройка Pong обработчика
+        self.websocket.pong_received = self._handle_pong
+        
+        # Таймер для периодической отправки ping
+        async def send_heartbeat():
+            while self.running:
+                try:
+                    await self.websocket.ping()
+                    logger.info("Heartbeat ping sent")
+                except Exception as e:
+                    logger.error(f"Failed to send heartbeat: {e}")
+                    break
+                await asyncio.sleep(30)  # Ping каждые 30 секунд, совпадает с сервером
+                
+        # Запускаем heartbeat в фоне
+        heartbeat_task = asyncio.create_task(send_heartbeat())
+        
         try:
             async for raw_message in self.websocket:
                 message = json.loads(raw_message)
@@ -203,21 +237,33 @@ class WSClient:
                 elif msg_type == MSG_LLM_ERROR:
                     self._handle_llm_error(message)
 
-        except websockets.ConnectionClosed:
-            logger.info("WebSocket connection closed")
+                elif msg_type == MSG_MODEL_RESPONSE:
+                    self._handle_model_response(message)
+
+        except websockets.ConnectionClosed as e:
+            logger.error(f"WebSocket connection closed with code {e.code}, reason: {e.reason}")
+            self.app.notify(f"Connection lost: {e.reason}", severity="error")
         except Exception as e:
-            logger.error(f"Receive error: {e}")
+            logger.error(f"Receive error: {e}", exc_info=True)
+            self.app.notify("Connection error occurred", severity="error")
 
-        self.connected = False
-        # Очищаем participants при отключении (только себя оставляем)
-        self.participants = {}
-        if self.client_id:
-            self.participants[self.client_id] = {
-                "username": self.username,
-                "public_key_pem": self.public_key_pem,
-            }
-        self.app.call_later(self.app.update_contacts_list)
-
+        finally:
+            self.connected = False
+            # Отменяем heartbeat таск
+            if 'heartbeat_task' in locals():
+                heartbeat_task.cancel()
+            # Очищаем participants при отключении (только себя оставляем)
+            self.participants = {}
+            if self.client_id:
+                self.participants[self.client_id] = {
+                    "username": self.username,
+                    "public_key_pem": self.public_key_pem,
+                }
+            self.app.call_later(self.app.update_contacts_list)
+            
+    def _handle_pong(self, pong_data):
+        """Обработчик для Pong ответов от сервера."""
+        logger.info("Received pong")
     def _handle_ack(self, message: dict):
         msg_id = message.get("message_id")
         if msg_id in self.pending_messages:
@@ -293,24 +339,54 @@ class WSClient:
         participants_list = message.get("participants", [])
         logger.info(f"Participants update: count={count}")
 
-        self.participants = {}
+        # Сохраняем текущие модели (если есть), чтобы не потерять их при обновлении
+        old_server_models = self.server_models.copy() if hasattr(self, 'server_models') else []
+        
+        # Создаём новый dict для участников — НЕ перезаписываем полностью, а добавляем/обновляем
+        new_participants = {}
         for p in participants_list:
             cid = p.get("client_id")
             uname = p.get("username")
+            is_model = p.get("is_model", False)
             pubkey = p.get("public_key", "").encode("utf-8")
             if cid and uname:
-                self.participants[cid] = {
-                    "username": uname,
-                    "public_key_pem": pubkey,
-                }
+                # Если это модель (is_model=true или client_id=-1), сохраняем её отдельно
+                if is_model or cid == -1:
+                    # Сохраняем как модель с полными данными из participants
+                    model_data = {
+                        "id": p.get("model_id", ""),
+                        "name": uname,
+                        "baseUrl": p.get("base_url", ""),
+                        "envKey": p.get("env_key", ""),
+                        # Сохраняем как модель (не просто dict участника)
+                    }
+                    if cid == -1:
+                        # Серверная модель — сохраняем в self.server_models
+                        existing = next((m for m in self.server_models if m["id"] == p.get("model_id")), None)
+                        if not existing or existing.get("name") != uname:
+                            self.server_models.append(model_data)
+                    else:
+                        # Личная модель — обновляем в self.user_models
+                        for i, um in enumerate(self.user_models):
+                            if um["id"] == p.get("model_id"):
+                                self.user_models[i] = model_data
+                                break
+                elif cid and uname:
+                    new_participants[cid] = {
+                        "username": uname,
+                        "public_key_pem": pubkey,
+                    }
 
         # Добавляем себя обратно, если потеряли
-        if self.client_id and self.client_id not in self.participants:
-            self.participants[self.client_id] = {
+        if self.client_id and self.client_id not in new_participants:
+            new_participants[self.client_id] = {
                 "username": self.username,
                 "public_key_pem": self.public_key_pem,
             }
 
+        self.participants = new_participants
+
+        # Обновляем UI (через call_later — из worker'а нельзя напрямую)
         logger.info(f"Participants updated: {[(cid, d['username']) for cid, d in self.participants.items()]}")
         self.app.call_later(self.app.update_contacts_list)
 
@@ -319,8 +395,10 @@ class WSClient:
     def _handle_llm_models(self, message: dict):
         """S→C: список доступных LLM-моделей."""
         self.available_models = message.get("models", [])
+        self.server_models = list(self.available_models)  # копируем
         logger.info(f"Received {len(self.available_models)} LLM model(s): {[m['name'] for m in self.available_models]}")
         self.app.call_later(self.app.update_llm_models)
+        self.app.call_later(self.app.update_contacts_list)
 
     def _handle_llm_chunk(self, message: dict):
         """S→C: часть streaming-ответа от LLM."""
@@ -376,3 +454,220 @@ class WSClient:
             logger.info(f"Sent LLM request for model {model_id}")
         except websockets.ConnectionClosed:
             self.app.notify("Connection lost!", severity="error")
+
+    # ── Модель-чаты ────────────────────────────────────────
+
+    async def send_model_message(self, model_id: str, content: str):
+        """Отправить сообщение в чат модели."""
+        import uuid
+        from datetime import datetime
+        from app import Message
+
+        msg_id = f"model_{model_id}_{uuid.uuid4().hex[:8]}"
+
+        payload = make_model_message(model_id, content, msg_id)
+        try:
+            await self.websocket.send(payload)
+        except websockets.ConnectionClosed:
+            self.app.notify("Connection lost!", severity="error")
+            return
+
+        # Добавляем сообщение пользователя в историю
+        msg = Message(content, is_mine=True, client_id=self.client_id,
+                      username=self.username, message_id=msg_id,
+                      timestamp=datetime.now().strftime("%H:%M"))
+
+        if model_id not in self.model_conversations:
+            self.model_conversations[model_id] = []
+        self.model_conversations[model_id].append(msg)
+        self.messages.append(msg)
+
+        # Показываем индикатор "думаю"
+        thinking = Message("[thinking...]", is_mine=False, client_id=-1,
+                           username=f"🤖 {model_id}", message_id=f"{msg_id}_thinking",
+                           timestamp=datetime.now().strftime("%H:%M"))
+        self.model_conversations[model_id].append(thinking)
+        self.messages.append(thinking)
+
+        self.app.call_later(self.app.update_messages_display)
+        logger.info(f"Sent model message to {model_id}: {content[:50]}")
+
+    def _handle_model_response(self, message: dict):
+        """S→C: ответ от модели в чате (streaming chunks)."""
+        model_id = message.get("model_id", "")
+        model_name = message.get("model_name", model_id)
+        content = message.get("content", "")
+        done = message.get("done", False)
+        stream = message.get("stream", False)
+        timestamp = message.get("timestamp", "")
+
+    async def send_user_llm_request(self, model_id: str, messages: list, callback=None):
+        """Прямой HTTP SSE запрос к LLM API для личных моделей."""
+        # Находим модель в user_models по id
+        model = None
+        for m in self.user_models:
+            if m["id"] == model_id:
+                model = m
+                break
+        
+        if not model:
+            logger.error(f"User model {model_id} not found")
+            if callback:
+                try:
+                    callback("", True)  # done = True
+                except Exception:
+                    pass
+            return
+        
+        base_url = model.get("baseUrl", "").rstrip("/")
+        if not base_url:
+            logger.error(f"No baseUrl for user model {model_id}")
+            if callback:
+                try:
+                    callback("", True)  # done = True
+                except Exception:
+                    pass
+            return
+        
+        # Формируем URL
+        url = f"{base_url}/v1/chat/completions"
+        
+        # Подготавливаем headers
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        env_key_name = model.get("envKey", "OPENAI_API_KEY")
+        api_key = None
+        if env_key_name and env_key_name in os.environ:
+            api_key = os.environ[env_key_name]
+        
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        
+        # Подготавливаем payload
+        payload = {
+            "model": model.get("name", model_id),
+            "messages": messages,
+            "stream": True
+        }
+        
+        # Запоминаем callback
+        if callback:
+            if model_id not in self.llm_callbacks:
+                self.llm_callbacks[model_id] = []
+            self.llm_callbacks[model_id].append(callback)
+        
+        # Создаем HTTP сессию и отправляем streaming запрос
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(url, json=payload, headers=headers) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"LLM API error {response.status}: {error_text}")
+                        if callback:
+                            for cb in self.llm_callbacks.get(model_id, []):
+                                try:
+                                    cb(f"Error {response.status}: {error_text}", True)
+                                except Exception:
+                                    pass
+                        self.llm_callbacks.pop(model_id, None)
+                        return
+                    
+                    # Обработка SSE ответа
+                    async for line in response.content:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        # SSE формат: data: {...}
+                        if line.startswith(b"data: "):
+                            data = line[6:]  # убираем "data: "
+                            if data == b"[DONE]":
+                                # Завершение потока
+                                if model_id in self.llm_callbacks:
+                                    callbacks = self.llm_callbacks.pop(model_id, [])
+                                    for cb in callbacks:
+                                        try:
+                                            # Отправляем пустой chunk с done=True
+                                            cb("", True)
+                                        except Exception as e:
+                                            logger.error(f"Callback error on done: {e}")
+                                break
+                            
+                            try:
+                                # Разбираем JSON
+                                chunk_data = json.loads(data)
+                                if "choices" in chunk_data and len(chunk_data["choices"]) > 0:
+                                    delta = chunk_data["choices"][0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    if content:
+                                        # Вызываем callback для каждого chunk
+                                        if model_id in self.llm_callbacks:
+                                            for cb in self.llm_callbacks[model_id]:
+                                                try:
+                                                    cb(content, False)  # done=False
+                                                except Exception as e:
+                                                    logger.error(f"Callback error: {e}")
+                            except json.JSONDecodeError:
+                                logger.warning(f"Invalid JSON in LLM stream: {data}")
+            except Exception as e:
+                logger.error(f"LLM HTTP request failed: {e}")
+                if callback:
+                    for cb in self.llm_callbacks.get(model_id, []):
+                        try:
+                            cb(f"Request failed: {e}", True)
+                        except Exception:
+                            pass
+                self.llm_callbacks.pop(model_id, None)
+
+        from app import Message
+
+        if model_id not in self.model_conversations:
+            self.model_conversations[model_id] = []
+
+        if stream and not done:
+            # Streaming chunk — обновляем последний message модели
+            # Находим последнее сообщение модели (thinking или chunk)
+            last_msgs = self.model_conversations[model_id]
+            for i in range(len(last_msgs) - 1, -1, -1):
+                if not last_msgs[i].is_mine and last_msgs[i].client_id == -1:
+                    # Это наше thinking/chunk сообщение — обновляем
+                    if content:
+                        if last_msgs[i].content == "[thinking...]":
+                            last_msgs[i].content = content
+                        else:
+                            last_msgs[i].content += content
+                    break
+            else:
+                # Нет сообщения для обновления — создаём новую
+                chunk_msg = Message(content, is_mine=False, client_id=-1,
+                                    username=f"🤖 {model_name}",
+                                    timestamp=timestamp)
+                self.model_conversations[model_id].append(chunk_msg)
+                self.messages.append(chunk_msg)
+        elif done:
+            # Завершение — помечаем последнее thinking как done
+            last_msgs = self.model_conversations[model_id]
+            for i in range(len(last_msgs) - 1, -1, -1):
+                if not last_msgs[i].is_mine and last_msgs[i].client_id == -1:
+                    if last_msgs[i].content == "[thinking...]":
+                        last_msgs[i].content = "[done]"
+                    break
+            else:
+                # Создаём финальное сообщение
+                done_msg = Message("", is_mine=False, client_id=-1,
+                                   username=f"🤖 {model_name}",
+                                   timestamp=timestamp)
+                self.model_conversations[model_id].append(done_msg)
+                self.messages.append(done_msg)
+        else:
+            # Non-streaming полный ответ
+            resp_msg = Message(content, is_mine=False, client_id=-1,
+                               username=f"🤖 {model_name}",
+                               timestamp=timestamp)
+            self.model_conversations[model_id].append(resp_msg)
+            self.messages.append(resp_msg)
+
+        self.app.call_later(self.app.update_messages_display)
+        logger.info(f"Model response from {model_id}: {'done' if done else 'streaming'}")

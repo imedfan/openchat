@@ -53,6 +53,27 @@ func main() {
 	// Создание сервера
 	chatServer := server.NewChatServer(common.DefaultHost, *port, models)
 
+	// Горячая перезагрузка моделей
+	modelsDone := make(chan struct{})
+	modelsCh, modelsErrCh, watchErr := common.WatchModels(*modelsFile, modelsDone)
+	if watchErr != nil {
+		log.Printf("Warning: failed to watch models file: %v (hot reload disabled)", watchErr)
+	} else {
+		go func() {
+			for {
+				select {
+				case newModels := <-modelsCh:
+					log.Printf("Models file changed, reloading %d model(s)...", len(newModels))
+					chatServer.UpdateModels(newModels)
+				case err := <-modelsErrCh:
+					log.Printf("Models watch error: %v", err)
+				case <-modelsDone:
+					return
+				}
+			}
+		}()
+	}
+
 	// Получение IP для отображения
 	publicIP := server.GetPublicIP()
 
@@ -63,7 +84,7 @@ func main() {
 	fmt.Printf("  Listening on: %s:%d\n", common.DefaultHost, *port)
 	fmt.Printf("  Public IP:    %s\n", publicIP)
 	fmt.Printf("  Connect to:   ws://%s:%d\n", publicIP, *port)
-	fmt.Println("==================================================\n")
+	fmt.Println("==================================================")
 
 	// WebSocket handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

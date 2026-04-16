@@ -8,19 +8,21 @@ import (
 
 // ── Типы сообщений ─────────────────────────────────────────
 const (
-	MsgConnect     = "connect"
-	MsgConnected   = "connected"
-	MsgMessage     = "message"
-	MsgDirect      = "direct"
-	MsgAck         = "ack"
-	MsgSystem      = "system"
+	MsgConnect      = "connect"
+	MsgConnected    = "connected"
+	MsgMessage      = "message"
+	MsgDirect       = "direct"
+	MsgAck          = "ack"
+	MsgSystem       = "system"
 	MsgParticipants = "participants"
 	// LLM-сообщения
-	MsgLLMModels  = "llm_models"  // S→C: список доступных моделей
-	MsgLLMRequest = "llm_request"  // C→S: запрос к LLM
-	MsgLLMChunk    = "llm_chunk"   // S→C: часть streaming-ответа
-	MsgLLMError    = "llm_error"   // S→C: ошибка LLM-запроса
-	MsgLLMDone     = "llm_done"    // S→C: завершение streaming-ответа
+	MsgLLMModels  = "llm_models" // S→C: список доступных моделей
+	MsgLLMRequest = "llm_request" // C→S: запрос к LLM
+	MsgLLMChunk   = "llm_chunk"  // S→C: часть streaming-ответа (done=true — завершение)
+	MsgLLMError   = "llm_error"  // S→C: ошибка LLM-запроса
+	// Модель-чаты
+	MsgModelMessage  = "model_message"  // C→S: сообщение в чат модели
+	MsgModelResponse = "model_response" // S→C: ответ модели в чат
 )
 
 // ── JSON структуры сообщений ──────────────────────────────
@@ -71,9 +73,9 @@ type SystemMessage struct {
 
 // ParticipantsMessage — S→C: список участников
 type ParticipantsMessage struct {
-	Type         string         `json:"type"`
-	Count        int            `json:"count"`
-	Participants []Participant  `json:"participants"`
+	Type         string        `json:"type"`
+	Count        int           `json:"count"`
+	Participants []Participant `json:"participants"`
 }
 
 // Participant — информация об одном участнике
@@ -81,6 +83,9 @@ type Participant struct {
 	ClientID  int    `json:"client_id"`
 	Username  string `json:"username"`
 	PublicKey string `json:"public_key"`
+	// IsModel=true если это виртуальный участник (LLM модель)
+	IsModel bool   `json:"is_model,omitempty"`
+	ModelID string `json:"model_id,omitempty"` // ID модели (если IsModel=true)
 }
 
 // BroadcastMessage — S→C: сообщение для рассылки
@@ -126,9 +131,9 @@ type LLMMessage struct {
 
 // LLMRequest — C→S: запрос к LLM-модели
 type LLMRequest struct {
-	Type     string        `json:"type"`
-	ModelID  string        `json:"model_id"`  // ID модели из конфига
-	Messages []LLMMessage  `json:"messages"`  // история диалога
+	Type     string       `json:"type"`
+	ModelID  string       `json:"model_id"` // ID модели из конфига
+	Messages []LLMMessage `json:"messages"` // история диалога
 }
 
 // LLMChunk — S→C: часть streaming-ответа от LLM
@@ -144,6 +149,25 @@ type LLMError struct {
 	Type    string `json:"type"`
 	ModelID string `json:"model_id"`
 	Error   string `json:"error"`
+}
+
+// ModelMessage — C→S: сообщение в чат модели (пользователь пишет модели)
+type ModelMessage struct {
+	Type      string `json:"type"`
+	ModelID   string `json:"model_id"`   // ID модели
+	Content   string `json:"content"`    // текст сообщения
+	MessageID string `json:"message_id"` // ID сообщения для ack
+}
+
+// ModelResponse — S→C: ответ модели в чат (streaming или полный)
+type ModelResponse struct {
+	Type      string `json:"type"`
+	ModelID   string `json:"model_id"`
+	ModelName string `json:"model_name"` // отображаемое имя модели
+	Content   string `json:"content"`    // текст ответа (пустой если streaming)
+	Done      bool   `json:"done"`       // true = ответ завершён
+	Stream    bool   `json:"stream"`     // true = streaming режим
+	Timestamp string `json:"timestamp"`
 }
 
 // ── Фабрики сообщений ─────────────────────────────────────
@@ -250,9 +274,19 @@ func MakeLLMError(modelID string, errMsg string) string {
 	return string(data)
 }
 
-// MakeLLMDone — S→C: завершение streaming-ответа (alias для chunk с done=true и пустым текстом)
-func MakeLLMDone(modelID string) string {
-	return MakeLLMChunk(modelID, "", true)
+// MakeModelMessage — S→C: ответ модели в чат
+func MakeModelMessage(modelID string, modelName string, content string, done bool, stream bool) string {
+	msg := ModelResponse{
+		Type:      MsgModelResponse,
+		ModelID:   modelID,
+		ModelName: modelName,
+		Content:   content,
+		Done:      done,
+		Stream:    stream,
+		Timestamp: time.Now().Format("15:04"),
+	}
+	data, _ := json.Marshal(msg)
+	return string(data)
 }
 
 // ParseMessage — парсит JSON в map для определения типа

@@ -28,6 +28,10 @@ MSG_LLM_REQUEST = "llm_request"    # C→S: запрос к LLM
 MSG_LLM_CHUNK = "llm_chunk"        # S→C: часть streaming-ответа
 MSG_LLM_ERROR = "llm_error"        # S→C: ошибка LLM-запроса
 
+# Модель-чаты
+MSG_MODEL_MESSAGE = "model_message"   # C→S: сообщение в чат модели
+MSG_MODEL_RESPONSE = "model_response" # S→C: ответ модели в чат
+
 
 # ── Фабрики сообщений ──────────────────────────────────────
 
@@ -106,4 +110,14 @@ def make_llm_request(model_id: str, messages: list) -> str:
         "type": MSG_LLM_REQUEST,
         "model_id": model_id,
         "messages": messages,  # [{"role": "user", "content": "..."}, ...]
+    })
+
+
+def make_model_message(model_id: str, content: str, message_id: str) -> str:
+    """C→S: сообщение в чат модели."""
+    return json.dumps({
+        "type": MSG_MODEL_MESSAGE,
+        "model_id": model_id,
+        "content": content,
+        "message_id": message_id,
     })

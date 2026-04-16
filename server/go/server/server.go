@@ -11,19 +11,26 @@ import (
 	"openchat-server/protocol"
 )
 
+// WSConn — интерфейс для WebSocket соединения (для тестирования)
+type WSConn interface {
+	WriteMessage(messageType int, data []byte) error
+	ReadMessage() (messageType int, p []byte, err error)
+	Close() error
+}
+
 // ClientInfo — информация о подключённом клиенте
 type ClientInfo struct {
 	ID        int
 	Username  string
 	PublicKey []byte
-	Conn      *websocket.Conn
+	Conn      WSConn
 }
 
 // ChatServer — WebSocket сервер чата
 type ChatServer struct {
 	Host            string
 	Port            int
-	Clients         map[int]*ClientInfo    // client_id → ClientInfo
+	Clients         map[int]*ClientInfo // client_id → ClientInfo
 	ClientIDCounter int
 	Mu              sync.RWMutex
 	Models          []common.ModelConfig // Доступные LLM-модели
@@ -65,7 +72,55 @@ func (s *ChatServer) GetParticipantsList() []protocol.Participant {
 			PublicKey: string(client.PublicKey),
 		})
 	}
+
+	// Добавляем модели как виртуальных участников (если все поля заполнены)
+	participants = append(participants, s.getModelParticipants()...)
+
 	return participants
+}
+
+// getModelParticipants возвращает модели как виртуальных участников
+func (s *ChatServer) getModelParticipants() []protocol.Participant {
+	// Используем уже удерживаемую блокировку из вызывающего кода, не делаем новый RLock
+
+	if !common.ModelsReady(s.Models) {
+		return nil
+	}
+
+	result := make([]protocol.Participant, 0, len(s.Models))
+	for _, m := range s.Models {
+		result = append(result, protocol.Participant{
+			ClientID:  -1,     // отрицательный ID = виртуальный участник
+			Username:  m.Name, // отображаемое имя из name
+			PublicKey: "",
+			IsModel:   true,
+			ModelID:   m.ID,
+		})
+	}
+	return result
+}
+
+// UpdateModels обновляет список моделей и рассылает обновлённый список участников
+func (s *ChatServer) UpdateModels(models []common.ModelConfig) {
+	s.Mu.Lock()
+	s.Models = models
+	s.Mu.Unlock()
+
+	log.Printf("Models updated: %d model(s)", len(models))
+
+	// Рассылаем обновлённый список участников всем
+	s.SendParticipantsToAll(nil)
+
+	// Если модели готовы, отправляем список LLM-моделей всем клиентам
+	if common.ModelsReady(models) {
+		s.Mu.RLock()
+		for _, client := range s.Clients {
+			go func(c *ClientInfo) {
+				s.HandleLLMModels(c)
+			}(client)
+		}
+		s.Mu.RUnlock()
+	}
 }
 
 // SendParticipantsToAll рассылает обновлённый список участников всем (кроме exclude)
@@ -169,7 +224,7 @@ func (s *ChatServer) GetClientUsername(clientID int) string {
 }
 
 // GetClientConn безопасно получает WebSocket подключение клиента
-func (s *ChatServer) GetClientConn(clientID int) *websocket.Conn {
+func (s *ChatServer) GetClientConn(clientID int) WSConn {
 	s.Mu.RLock()
 	defer s.Mu.RUnlock()
 

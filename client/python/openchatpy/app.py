@@ -5,14 +5,33 @@ ChatApp — основной Textular App, оркестрация экранов
 import logging
 import asyncio
 from typing import Optional, List
+def sanitize_id(text: str) -> str:
+    """
+    Санитизирует строку для использования в качестве Textual ID.
+    Заменяет все недопустимые символы на подчеркивание и предотвращает
+    начало ID с цифры.
+    """
+    # Заменяем все недопустимые символы на '_'
+    sanitized = "".join(c if c.isalnum() or c == '_' else '_' for c in text)
+    
+    # Проверяем, не начинается ли с цифры
+    if sanitized and sanitized[0].isdigit():
+        sanitized = "id_" + sanitized
+    
+    # Гарантируем, что строка не пустая
+    if not sanitized:
+        sanitized = "id_empty"
+    
+    return sanitized
+
 
 from textual.app import App
 from textual.widgets import Label, Input, ListView, ListItem, TextArea, Tabs, Tab, Button, RichLog
 
 from screens import LoginScreen, ChatScreen, CommandInput, CommandOverlay
-from llm_screen import LLMChatScreen
 from ws_client import WSClient
 from commands import registry
+from model_loader import user_models_ready
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +121,16 @@ class ChatApp(App):
 
     # ── Управление вкладками чата ──────────────────────────
 
+    def _find_original_model_id(self, sanitized_id: str, is_user: bool = False) -> str:
+        """Найти оригинальный model_id по санитизированному ID."""
+        models = self.ws.user_models if is_user else self.ws.server_models
+        for m in models:
+            mid = m.get("id", m.get("model_id", ""))
+            if sanitize_id(mid) == sanitized_id:
+                return mid
+        # Если не нашли — возвращаем sanitized_id (может быть уже оригинал)
+        return sanitized_id
+
     def get_chat_tab_id(self, contact_id: Optional[int]) -> str:
         """Вернуть ID вкладки для контакта."""
         if contact_id is None:
@@ -134,6 +163,36 @@ class ChatApp(App):
         except Exception as e:
             logger.error(f"add_chat_tab error: {e}")
 
+    def add_chat_tab_model(self, model_id: str, is_user: bool = False) -> None:
+        """Создать вкладку для модель-чата."""
+        try:
+            chat_screen = self.screen
+            if not isinstance(chat_screen, ChatScreen):
+                return
+            chat_tabs = chat_screen.query_one("#chat-tabs", Tabs)
+
+            prefix = "umodel" if is_user else "smodel"
+            tab_id = f"tab-{prefix}-{sanitize_id(model_id)}"
+
+            if tab_id in [t.id for t in chat_tabs.query("Tab")]:
+                chat_tabs.active = tab_id
+                return
+
+            # Находим имя модели
+            models = self.ws.user_models if is_user else self.ws.server_models
+            model_name = model_id
+            for m in models:
+                mid = m.get("id", m.get("model_id", ""))
+                if mid == model_id:
+                    model_name = m.get("name", m.get("username", model_id))
+                    break
+
+            icon = "🔒" if is_user else "🤖"
+            chat_tabs.add_tab(Tab(f"{icon} {model_name}", id=tab_id))
+            chat_tabs.active = tab_id
+        except Exception as e:
+            logger.error(f"add_chat_tab_model error: {e}")
+
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
         """При активации вкладки переключаем контекст чата."""
         if not event.tab:
@@ -146,6 +205,15 @@ class ChatApp(App):
             contact_id = int(tab_id.replace("tab-dm-", ""))
             self.ws.current_contact = contact_id
             self.ws.unread_counts[contact_id] = 0
+        elif tab_id and tab_id.startswith("tab-smodel-"):
+            sanitized_id = tab_id.replace("tab-smodel-", "")
+            # Находим оригинальный model_id по санитизированному
+            model_id = self._find_original_model_id(sanitized_id, is_user=False)
+            self.ws.current_contact = f"model:{model_id}"
+        elif tab_id and tab_id.startswith("tab-umodel-"):
+            sanitized_id = tab_id.replace("tab-umodel-", "")
+            model_id = self._find_original_model_id(sanitized_id, is_user=True)
+            self.ws.current_contact = f"usermodel:{model_id}"
 
         self.ws.unread_counts[0] = 0
         self.update_messages_display()
@@ -178,7 +246,14 @@ class ChatApp(App):
             if isinstance(chat_screen, ChatScreen):
                 messages_display = chat_screen.query_one("#chat-messages", TextArea)
 
-                if self.ws.current_contact:
+                contact = self.ws.current_contact
+
+                # Модель-чат: показываем историю из model_conversations
+                if contact and isinstance(contact, str) and contact.startswith("model:"):
+                    model_id = contact.replace("model:", "")
+                    msgs = self.ws.model_conversations.get(model_id, [])
+                    filtered = msgs
+                elif self.ws.current_contact:
                     filtered = [msg for msg in self.ws.messages
                                 if (msg.client_id == self.ws.current_contact and msg.is_direct) or
                                    (msg.is_mine and msg.target_id == self.ws.current_contact)]
@@ -196,6 +271,10 @@ class ChatApp(App):
                         lines.append(f"[{msg.timestamp}] {ack_status} {sender}: {msg.content}")
                     elif msg.client_id == 0:
                         lines.append(f"[{msg.timestamp}] {msg.content}")
+                    elif msg.client_id == -1:
+                        # Модель-ответ
+                        sender = msg.username if msg.username else "🤖 Model"
+                        lines.append(f"[{msg.timestamp}] {sender}: {msg.content}")
                     else:
                         sender = msg.username if msg.username else f"User {msg.client_id}"
                         lines.append(f"[{msg.timestamp}] {sender}: {msg.content}")
@@ -208,94 +287,107 @@ class ChatApp(App):
 
     def update_contacts_list(self) -> None:
         try:
-            logger.info(f"update_contacts_list called. participants={self.ws.participants}, self.client_id={self.ws.client_id}")
             chat_screen = self.screen
-            logger.info(f"Current screen: {type(chat_screen).__name__}")
             if not isinstance(chat_screen, ChatScreen):
-                logger.warning(f"Not a ChatScreen, skipping update")
                 return
 
             contacts_list = chat_screen.query_one("#contacts-list", ListView)
 
+            # Собираем все ID которые должны быть
+            # Формат: general, user_N, srv_model_ID, usr_model_ID
             others = {cid: data for cid, data in self.ws.participants.items()
                       if cid != self.ws.client_id}
-            logger.info(f"Others (excluding self): {others}")
+
+            # Отделяем модели от обычных пользователей
+            real_users = {}
+            server_models = []
+            for cid, data in others.items():
+                if data.get("is_model"):
+                    server_models.append(data)
+                else:
+                    real_users[cid] = data
 
             current_ids = {item.id for item in contacts_list.children} if contacts_list.children else set()
-            new_ids = {"general"} | {f"user_{cid}" for cid in others.keys()}
-            logger.info(f"current_ids={current_ids}, new_ids={new_ids}")
 
-            # Удаляем элементы которых больше нет (кроме general)
+            # Формируем полный список ID (санитизируем ID моделей)
+            new_ids = {"general"}
+            new_ids |= {f"user_{cid}" for cid in real_users.keys()}
+            new_ids |= {f"srv_model_{sanitize_id(m.get('model_id', m.get('username', '')))}" for m in server_models}
+            if user_models_ready(self.ws.user_models):
+                new_ids |= {f"usr_model_{sanitize_id(m['id'])}" for m in self.ws.user_models}
+
+            # Удаляем элементы которых больше нет
             for item in list(contacts_list.children):
                 if item.id not in new_ids:
-                    logger.info(f"Removing contact: {item.id}")
                     item.remove()
 
-            # General — всегда первый элемент (перемещаем в начало если уже есть)
-            general_unread = self.ws.unread_counts.get(0, 0)
-            general_label = "● General" if general_unread > 0 else "General"
-            general_is_highlight = self.ws.current_contact is None
+            # Helper для создания ListItem
+            def make_item(label_text: str, item_id: str, is_highlight: bool, unread: int = 0) -> ListItem:
+                label = f"● {label_text}" if unread > 0 else label_text
+                item = ListItem(Label(label), id=item_id)
+                if unread > 0:
+                    item.add_class("unread")
+                if is_highlight:
+                    item.add_class("--highlight")
+                return item
 
+            # 1) General — всегда первый
+            general_unread = self.ws.unread_counts.get(0, 0)
+            general_is_highlight = self.ws.current_contact is None
             if "general" in current_ids:
-                # Перемещаем general в начало
                 for child in contacts_list.children:
                     if child.id == "general":
-                        child.query_one(Label).update(general_label)
-                        if general_unread > 0:
-                            child.add_class("unread")
-                        else:
-                            child.remove_class("unread")
-                        if general_is_highlight:
-                            child.add_class("--highlight")
-                        else:
-                            child.remove_class("--highlight")
+                        child.query_one(Label).update("● General" if general_unread > 0 else "General")
+                        child.set_class(general_unread > 0, "unread")
+                        child.set_class(general_is_highlight, "--highlight")
                         break
             else:
-                general_item = ListItem(Label(general_label), id="general")
-                if general_unread > 0:
-                    general_item.add_class("unread")
-                if general_is_highlight:
-                    general_item.add_class("--highlight")
-                # Вставляем general первым
+                item = make_item("General", "general", general_is_highlight, general_unread)
                 if contacts_list.children:
                     contacts_list.children[0].remove()
-                    contacts_list.append(general_item)
+                    contacts_list.append(item)
                 else:
-                    contacts_list.append(general_item)
-                logger.info("Added: general")
+                    contacts_list.append(item)
 
-            # Контакты
-            for client_id, data in others.items():
+            # 2) Серверные модели (🤖)
+            for m in server_models:
+                model_id = m.get('model_id', '')
+                item_id = f"srv_model_{sanitize_id(model_id)}"
+                model_name = m.get("username", "Unknown Model")
+                is_highlight = self.ws.current_contact == f"model:{model_id}"
+                if item_id not in current_ids:
+                    contacts_list.append(make_item(f"🤖 {model_name}", item_id, is_highlight))
+                    logger.info(f"Added server model contact: {item_id}")
+
+            # 3) Личные модели (🔒)
+            if user_models_ready(self.ws.user_models):
+                for m in self.ws.user_models:
+                    model_id = m['id']
+                    item_id = f"usr_model_{sanitize_id(model_id)}"
+                    is_highlight = self.ws.current_contact == f"usermodel:{model_id}"
+                    if item_id not in current_ids:
+                        contacts_list.append(make_item(f"🔒 {m['name']}", item_id, is_highlight))
+                        logger.info(f"Added user model contact: {item_id}")
+
+            # 4) Обычные пользователи
+            for client_id, data in real_users.items():
                 item_id = f"user_{client_id}"
                 is_highlight = self.ws.current_contact == client_id
                 if item_id not in current_ids:
                     unread = self.ws.unread_counts.get(client_id, 0)
                     username = data.get("username", f"User {client_id}")
-                    label = f"● {username}" if unread > 0 else username
-                    item = ListItem(Label(label), id=item_id)
-                    if unread > 0:
-                        item.add_class("unread")
-                    if is_highlight:
-                        item.add_class("--highlight")
-                    contacts_list.append(item)
-                    logger.info(f"Added contact: {item_id} = {username}")
+                    contacts_list.append(make_item(username, item_id, is_highlight, unread))
+                    logger.info(f"Added contact: {item_id}")
                 else:
                     for child in contacts_list.children:
                         if child.id == item_id:
                             unread = self.ws.unread_counts.get(client_id, 0)
                             username = data.get("username", f"User {client_id}")
-                            label = f"● {username}" if unread > 0 else username
-                            child.query_one(Label).update(label)
-                            if unread > 0:
-                                child.add_class("unread")
-                            else:
-                                child.remove_class("unread")
-                            if is_highlight:
-                                child.add_class("--highlight")
-                            else:
-                                child.remove_class("--highlight")
+                            child.query_one(Label).update(f"● {username}" if unread > 0 else username)
+                            child.set_class(unread > 0, "unread")
+                            child.set_class(is_highlight, "--highlight")
                             break
-            logger.info(f"Contacts list updated. Children: {[item.id for item in contacts_list.children]}")
+
             chat_screen.refresh()
         except Exception as e:
             logger.error(f"Contacts update error: {e}", exc_info=True)
@@ -363,8 +455,30 @@ class ChatApp(App):
                 return
 
             # Обычное сообщение
-            if self.ws.current_contact:
-                self.run_worker(self.ws.send_direct(self.ws.current_contact, content), exclusive=True)
+            contact = self.ws.current_contact
+
+            # Модель-чат (серверная модель)
+            if contact and isinstance(contact, str) and contact.startswith("model:"):
+                model_id = contact.replace("model:", "")
+                self.run_worker(self.ws.send_model_message(model_id, content), exclusive=True)
+            # Модель-чат (личная модель — прямой HTTP вызов)
+            elif contact and isinstance(contact, str) and contact.startswith("usermodel:"):
+                model_id = contact.replace("usermodel:", "")
+                # Находим модель в user_models
+                model = None
+                for m in self.ws.user_models:
+                    if m["id"] == model_id:
+                        model = m
+                        break
+                if model:
+                    messages = [{"role": "user", "content": content}]
+                    self.run_worker(
+                        self.ws.send_user_llm_request(model_id, messages,
+                                                     callback=lambda chunk, done: None),
+                        exclusive=True
+                    )
+            elif contact:
+                self.run_worker(self.ws.send_direct(contact, content), exclusive=True)
             else:
                 self.run_worker(self.ws.send_broadcast(content), exclusive=True)
                 self.ws.unread_counts[0] = 0  # сброс unread при отправке в general
@@ -423,11 +537,23 @@ class ChatApp(App):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item and event.item.id:
-            if event.item.id == "general":
+            item_id = event.item.id
+
+            if item_id == "general":
                 self.ws.current_contact = None
                 self.add_chat_tab(None)
+            elif item_id.startswith("srv_model_"):
+                sanitized_id = item_id.replace("srv_model_", "")
+                model_id = self._find_original_model_id(sanitized_id, is_user=False)
+                self.ws.current_contact = f"model:{model_id}"
+                self.add_chat_tab_model(model_id)
+            elif item_id.startswith("usr_model_"):
+                sanitized_id = item_id.replace("usr_model_", "")
+                model_id = self._find_original_model_id(sanitized_id, is_user=True)
+                self.ws.current_contact = f"usermodel:{model_id}"
+                self.add_chat_tab_model(model_id, is_user=True)
             else:
-                contact_id = int(event.item.id.replace("user_", ""))
+                contact_id = int(item_id.replace("user_", ""))
                 self.ws.current_contact = contact_id
                 self.ws.unread_counts[contact_id] = 0
                 self.add_chat_tab(contact_id)
@@ -482,8 +608,22 @@ class ChatApp(App):
                     pass
 
                 # Отправляем сообщение
-                if self.ws.current_contact:
-                    self.run_worker(self.ws.send_direct(self.ws.current_contact, content), exclusive=True)
+                contact = self.ws.current_contact
+
+                # Модель-чат (серверная модель)
+                if contact and isinstance(contact, str) and contact.startswith("model:"):
+                    model_id = contact.replace("model:", "")
+                    self.run_worker(self.ws.send_model_message(model_id, content), exclusive=True)
+                # Модель-чат (личная модель)
+                elif contact and isinstance(contact, str) and contact.startswith("usermodel:"):
+                    model_id = contact.replace("usermodel:", "")
+                    messages = [{"role": "user", "content": content}]
+                    self.run_worker(
+                        self.ws.send_user_llm_request(model_id, messages),
+                        exclusive=True
+                    )
+                elif contact:
+                    self.run_worker(self.ws.send_direct(contact, content), exclusive=True)
                 else:
                     self.run_worker(self.ws.send_broadcast(content), exclusive=True)
                     self.ws.unread_counts[0] = 0
@@ -515,6 +655,9 @@ class ChatApp(App):
                 else:
                     # Дописываем chunk в ту же строку (без newline)
                     messages_widget.write(chunk)
+
+            # Плавное обновление UI — обновляем общий список сообщений
+            self.call_later(self.update_messages_display)
         except Exception as e:
             self.log(f"LLM stream update error: {e}")
 

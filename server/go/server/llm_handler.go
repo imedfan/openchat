@@ -84,7 +84,7 @@ func (s *ChatServer) HandleLLMRequest(client *ClientInfo, msg map[string]interfa
 	go func() {
 		err := llmClient.StreamMessage(messages, func(chunk string, done bool) {
 			if done {
-				payload := protocol.MakeLLMDone(modelID)
+				payload := protocol.MakeLLMChunk(modelID, "", true)
 				client.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
 				log.Printf("LLM streaming to client %d completed (model: %s)", client.ID, modelID)
 				return

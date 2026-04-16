@@ -176,27 +176,6 @@ class ExitCommand(ChatCommand):
         return None  # UI обновится отдельно
 
 
-# ── /ai ────────────────────────────────────────────────────
-
-class AICommand(ChatCommand):
-    @property
-    def name(self) -> str:
-        return "ai"
-
-    @property
-    def description(self) -> str:
-        return "Open LLM chat"
-
-    @property
-    def contexts(self) -> list:
-        return ["general", "dm"]
-
-    async def execute(self, ws, args: list):
-        # Открываем LLM-чат через приложение
-        ws.app.open_llm_chat()
-        return None
-
-
 # ── Регистрация ────────────────────────────────────────────
 
 def register_builtin_commands():
@@ -206,4 +185,3 @@ def register_builtin_commands():
     registry.register(DMCommand())
     registry.register(MeCommand())
     registry.register(ExitCommand())
-    registry.register(AICommand())

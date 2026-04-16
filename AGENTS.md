@@ -6,45 +6,87 @@
 auc/
 ├── AGENTS.md, ROADMAP.md, TODO.md, .gitignore, requirements.txt
 ├── server/
-│   └── go/                          # Go WebSocket сервер (Phase 1)
+│   └── go/                          # Go WebSocket сервер (Phase 1) — исходники
+│       ├── main.go                  # Точка входа, CLI аргументы, graceful shutdown
+│       ├── go.mod, go.sum           # Go модуль и зависимости
+│       ├── models.json              # Серверные LLM-модели (общие для всех)
+│       ├── README.md, .gitignore
+│       ├── common/
+│       │   ├── config.go            # Константы (порт, хост, буфер)
+│       │   └── models.go            # ModelConfig, LoadModels(), ModelsReady(), WatchModels()
+│       ├── protocol/
+│       │   └── protocol.go          # Типы сообщений, фабрики, парсинг
+│       └── server/
+│           ├── server.go            # ChatServer, клиенты, broadcast, участники
+│           ├── handler.go           # WebSocket роутинг (connect/broadcast/direct/model/disconnect)
+│           ├── llm_handler.go       # LLM список и запросы
+│           ├── llm_client.go        # HTTP SSE клиент для OpenAI-совместимых API
+│           └── *_test.go            # Тесты
 ├── client/
 │   └── python/
 │       └── openchatpy/              # Python Textual TUI клиент
+│           ├── client.py            # Точка входа
+│           ├── app.py               # ChatApp — оркестрация, UI
+│           ├── screens.py           # LoginScreen, ChatScreen, CommandInput
+│           ├── ws_client.py         # WebSocket клиент, E2EE, модель-чаты
+│           ├── protocol.py          # Типы сообщений, фабрики
+│           ├── crypto.py            # E2EE: ECDH + AES-256-GCM
+│           ├── llm_screen.py        # Экран LLM-чата
+│           ├── model_loader.py      # Загрузка личных моделей
+│           ├── models_user.json.example  # Шаблон личных моделей
+│           ├── commands/            # Система команд (/me, /users, /ai...)
+│           └── tests/               # pytest тесты
+├── builds/                          # Собранные бинарники (по датам)
+│   └── YYYY-MM-DD/                  # Папка с датой сборки
+│       └── openchat-server.exe      # Сервер
 └── old/                             # Архив (не используется)
-    ├── python-server/               # Старый Python сервер
-    ├── java-server/                 # Java сервер (прототип)
-    ├── build-artifacts/             # PyInstaller сборки
-    ├── logs/                        # Логи
-    └── cache/                       # __pycache__, .pytest_cache
 ```
 
-## Команды
+## Сборка и запуск
 
 ### Go сервер (Phase 1 — текущий)
 
+**Сборка:**
 ```bash
 cd server/go
-go run . [порт]            # по умолчанию 5000
 go build -o openchat-server.exe
 ```
 
-### Python клиент
-
+**Сборка в builds/ с датой:**
 ```bash
-cd client/python/openchatpy
-python client.py             # запуск клиента
+# Windows
+cd server\go
+go build -o openchat-server.exe
+for /f "tokens=2 delims==" %a in ('wmic OS Get localdatetime /value') do set "dt=%a"
+set "DATE_DIR=%dt:~0,4%-%dt:~4,2%-%dt:~6,2%"
+mkdir ..\..\builds\%DATE_DIR% 2>nul
+move openchat-server.exe ..\..\builds\%DATE_DIR%\
+
+# Linux/macOS
+cd server/go
+go build -o openchat-server.exe
+DATE_DIR=$(date +%Y-%m-%d)
+mkdir -p ../../builds/$DATE_DIR
+mv openchat-server.exe ../../builds/$DATE_DIR/
 ```
 
-### Зависимости клиента
+**Где лежит exe:** `builds/YYYY-MM-DD/openchat-server.exe`
+- Каждая сборка кладётся в папку с текущей датой
+- Старые сборки не удаляются (архив версий)
+- Файл `openchat-server.exe` не добавляется в git (см. `.gitignore`)
 
-`pip install textual`
-
-### Старый Python сервер (архив, old/python-server/)
-
+**Запуск:**
 ```bash
-cd old/python-server
-python server.py [порт]
+# Из папки builds/YYYY-MM-DD
+cd builds\2026-04-16
+openchat-server.exe [-port 5000] [-models models.json]
+
+# Или из исходников
+cd server/go
+go run . [порт]            # по умолчанию 5000
 ```
+
+**Зависимости для сборки:** Go 1.21+, `gorilla/websocket`, `fsnotify`
 
 ## Архитектура
 
@@ -60,8 +102,30 @@ python server.py [порт]
 | `message` | C→S | `type`, `content`, `message_id` |
 | `ack` | S→C | `type`, `message_id` |
 | `system` | S→C | `type`, `message`, `timestamp` (join/leave) |
-| `participants` | S→C | `type`, `count`, `participants[]` |
+| `participants` | S→C | `type`, `count`, `participants[]` (с `is_model` для моделей) |
 | `direct` | C→S/C | `type`, `from`, `to`, `content` (E2EE, сервер не расшифровывает) |
+| `model_message` | C→S | `type`, `model_id`, `content`, `message_id` (сообщение в чат модели) |
+| `model_response` | S→C | `type`, `model_id`, `model_name`, `content`, `done`, `stream` (ответ модели) |
+
+## Модель-чаты
+
+### Серверные модели (`server/go/models.json`)
+- Общий файл, виден **всем** подключённым клиентам
+- Если все поля заполнены (`id`, `name`, `envKey`, `baseUrl`) → модель появляется в Participants как `🤖 name`
+- Каждый пользователь может писать в этот чат — сообщения идут к LLM через SSE
+- **Горячая перезагрузка**: изменение `models.json` автоматически подхватывается сервером (fsnotify, debounce 500ms)
+
+### Личные модели (`client/python/openchatpy/models_user.json`)
+- Локальный файл пользователя, виден **только** этому клиенту
+- Та же структура что `models.json`, пример в `models_user.json.example`
+- Если заполнен → появляется как `🔒 name` в Participants
+- Отправка через `llm_request` (сервер не участвует — LLM API вызывается через сервер)
+
+### Participants — порядок отображения
+1. `General` — общий чат
+2. `🤖 ModelName` — серверные модели
+3. `🔒 ModelName` — личные модели
+4. `Username` — обычные пользователи
 
 ## Константы
 

@@ -1,7 +1,7 @@
 [
   {
     "id": "qwen3.5-9b-sushi-coder-rl",
-    "name": "local",
+    "name": "localserver",
     "envKey": "OPENCODE_API_KEY",
     "baseUrl": "http://192.168.0.2:1234/v1"
   }

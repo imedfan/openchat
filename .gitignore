@@ -28,3 +28,11 @@ qwen-code-export-*.md
 
 # === Go (server) ===
 server/go/openchat-server.exe
+
+# === Builds (бинарники по датам) ===
+builds/
+!builds/.gitkeep
+
+# === User models (may contain API keys) ===
+client/python/openchatpy/models_user.json
+!client/python/openchatpy/models_user.json.example

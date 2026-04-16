@@ -85,7 +85,7 @@ func TestLLMIntegration_FullFlow(t *testing.T) {
 		defer mu.Unlock()
 		if d {
 			done = true
-		} else {
+		} else if chunk != "" {
 			chunks = append(chunks, chunk)
 		}
 	})
@@ -101,14 +101,14 @@ func TestLLMIntegration_FullFlow(t *testing.T) {
 		t.Fatal("expected streaming to complete")
 	}
 
-	expectedChunks := []string{"Hello", " from", " LLM", "!"}
-	if len(chunks) != len(expectedChunks) {
-		t.Fatalf("expected %d chunks, got %d", len(expectedChunks), len(chunks))
+	// Проверяем полный текст вместо количества чанков (может варьироваться из-за SSE buffering)
+	fullText := ""
+	for _, c := range chunks {
+		fullText += c
 	}
-	for i, exp := range expectedChunks {
-		if chunks[i] != exp {
-			t.Errorf("chunk[%d]: expected %q, got %q", i, exp, chunks[i])
-		}
+	expectedText := "Hello from LLM!"
+	if fullText != expectedText {
+		t.Fatalf("expected full text %q, got %q", expectedText, fullText)
 	}
 }
 

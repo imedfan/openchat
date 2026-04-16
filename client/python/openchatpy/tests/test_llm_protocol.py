@@ -4,11 +4,17 @@
 
 import json
 import pytest
-
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
 
+# Добавляем корень openchatpy в sys.path (для импорта protocol)
+# __file__ = tests/test_llm_protocol.py → os.path.dirname → tests/ → ещё раз → openchatpy/
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_current_dir)  # папка openchatpy/
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+# Импортируем из модуля protocol (теперь он должен быть доступен)
 from protocol import (
     MSG_LLM_MODELS, MSG_LLM_CHUNK, MSG_LLM_ERROR, MSG_LLM_REQUEST,
     make_llm_request,

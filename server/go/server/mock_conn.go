@@ -2,8 +2,6 @@ package server
 
 import (
 	"sync"
-
-	"github.com/gorilla/websocket"
 )
 
 // MockConn — мок WebSocket подключения для тестирования

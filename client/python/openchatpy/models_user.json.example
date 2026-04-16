@@ -1,0 +1,8 @@
+[
+  {
+    "id": "my-local-model",
+    "name": "My Local Model",
+    "envKey": "MY_API_KEY",
+    "baseUrl": "http://localhost:1234/v1"
+  }
+]
