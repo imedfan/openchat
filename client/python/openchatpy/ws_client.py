@@ -67,6 +67,7 @@ class WSClient:
         self.server_models: list = []      # [{"id": ..., "name": ...}, ...]
         self.user_models: list = []         # [{"id": ..., "name": ...}, ...]
         self.model_conversations: Dict[str, list] = {}  # model_id → [Message, ...]
+        self._srv_resp_counter: int = 0    # счётчик для уникальных ID ответов серверной модели
 
     # ── Подключение ─────────────────────────────────────────
 
@@ -430,10 +431,9 @@ class WSClient:
 
     async def send_llm_request(self, model_id: str, messages: list, callback=None):
         """C→S: отправить запрос к LLM-модели."""
+        # Заменяем callback (не накаплируем старые)
         if callback:
-            if model_id not in self.llm_callbacks:
-                self.llm_callbacks[model_id] = []
-            self.llm_callbacks[model_id].append(callback)
+            self.llm_callbacks[model_id] = [callback]
 
         payload = make_llm_request(model_id, messages)
         try:
@@ -450,6 +450,7 @@ class WSClient:
         from datetime import datetime
         from app import Message
 
+        conv_key = f"srv:{model_id}"
         msg_id = f"model_{model_id}_{uuid.uuid4().hex[:8]}"
 
         payload = make_model_message(model_id, content, msg_id)
@@ -464,16 +465,16 @@ class WSClient:
                       username=self.username, message_id=msg_id,
                       timestamp=datetime.now().strftime("%H:%M"))
 
-        if model_id not in self.model_conversations:
-            self.model_conversations[model_id] = []
-        self.model_conversations[model_id].append(msg)
+        if conv_key not in self.model_conversations:
+            self.model_conversations[conv_key] = []
+        self.model_conversations[conv_key].append(msg)
         self.messages.append(msg)
 
         # Показываем индикатор "думаю"
         thinking = Message("[thinking...]", is_mine=False, client_id=-1,
                            username=f"🤖 {model_id}", message_id=f"{msg_id}_thinking",
                            timestamp=datetime.now().strftime("%H:%M"))
-        self.model_conversations[model_id].append(thinking)
+        self.model_conversations[conv_key].append(thinking)
         self.messages.append(thinking)
 
         self.app.call_later(self.app.update_messages_display)
@@ -488,38 +489,66 @@ class WSClient:
         stream = message.get("stream", False)
         timestamp = message.get("timestamp", "")
 
-        # Находим и удаляем сообщение "[thinking...]" из истории
-        if model_id in self.model_conversations:
-            # Ищем сообщение "[thinking...]" по шаблону ID (исходный msg_id + "_thinking")
-            thinking_msg_id = None
-            for msg in self.model_conversations[model_id]:
-                if msg.content == "[thinking...]" and msg.message_id.startswith(f"{model_id}_"):
-                    thinking_msg_id = msg.message_id
-                    break
-            
-            if thinking_msg_id:
-                # Удаляем сообщение "[thinking...]", оставляя только реальный ответ
-                self.model_conversations[model_id] = [
-                    msg for msg in self.model_conversations[model_id] 
-                    if msg.message_id != thinking_msg_id
-                ]
+        conv_key = f"srv:{model_id}"
+        if conv_key not in self.model_conversations:
+            self.model_conversations[conv_key] = []
 
-        # Добавляем ответ модели как новое сообщение
-        from app import Message
-        response_msg = Message(content, is_mine=False, client_id=-1,
-                             username=f"🤖 {model_name}", message_id=f"{model_id}_resp_{len(self.messages)}",
-                             timestamp=datetime.now().strftime("%H:%M"))
-        
-        if model_id not in self.model_conversations:
-            self.model_conversations[model_id] = []
-        self.model_conversations[model_id].append(response_msg)
-        self.messages.append(response_msg)
-        
-        # Обновляем отображение сообщений
+        # При первом chunk (stream=True): создаём уникальный ID для этого ответа
+        if content and stream:
+            # Удаляем "[thinking...]" из истории
+            self.model_conversations[conv_key] = [
+                msg for msg in self.model_conversations[conv_key]
+                if not (msg.content == "[thinking...]" and msg.client_id == -1)
+            ]
+            self.messages = [
+                msg for msg in self.messages
+                if not (msg.content == "[thinking...]" and msg.client_id == -1)
+            ]
+
+            # Создаём уникальный ID для этого конкретного ответа (не для модели!)
+            resp_id = f"srv_resp_{model_id}_{self._srv_resp_counter}"
+
+            # Находим или создаём сообщение для накопления контента
+            existing = None
+            for msg in self.model_conversations[conv_key]:
+                if msg.message_id == resp_id:
+                    existing = msg
+                    break
+
+            if existing is None:
+                # Новый ответ — инкрементируем счётчик
+                self._srv_resp_counter += 1
+                from app import Message
+                response_msg = Message(content, is_mine=False, client_id=-1,
+                                     username=f"🤖 {model_name}",
+                                     message_id=resp_id,
+                                     timestamp=timestamp)
+                self.model_conversations[conv_key].append(response_msg)
+                self.messages.append(response_msg)
+            else:
+                existing.content += content
+
+        # При done=True: финализируем (если не было streaming)
+        elif done:
+            # Проверяем есть ли уже streaming-ответ для этого запроса
+            # (по последнему созданному resp_id)
+            has_streaming = any(
+                msg.message_id.startswith(f"srv_resp_{model_id}_")
+                for msg in self.model_conversations[conv_key]
+            )
+            if not has_streaming:
+                resp_id = f"srv_resp_{model_id}_{self._srv_resp_counter}"
+                self._srv_resp_counter += 1
+                from app import Message
+                response_msg = Message(content if content else "[no response]",
+                                     is_mine=False, client_id=-1,
+                                     username=f"🤖 {model_name}",
+                                     message_id=resp_id,
+                                     timestamp=timestamp)
+                self.model_conversations[conv_key].append(response_msg)
+                self.messages.append(response_msg)
+
         self.app.call_later(self.app.update_messages_display)
-        
-        # Добавляем логирование
-        logger.info(f"Model {model_name} response: {content[:50]}")
 
     async def send_user_llm_request(self, model_id: str, messages: list, callback=None):
         """Прямой HTTP SSE запрос к LLM API для личных моделей."""
@@ -582,11 +611,10 @@ class WSClient:
             "stream": True
         }
         
-        # Запоминаем callback
+        # Заменяем callback для данной модели (не накаплируем!)
+        # Каждый запрос к модели — это отдельная сессия, старые callbacks больше не нужны
         if callback:
-            if model_id not in self.llm_callbacks:
-                self.llm_callbacks[model_id] = []
-            self.llm_callbacks[model_id].append(callback)
+            self.llm_callbacks[model_id] = [callback]
         
         # Создаем HTTP сессию и отправляем streaming запрос
         async with aiohttp.ClientSession() as session:

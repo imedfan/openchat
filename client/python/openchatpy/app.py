@@ -251,11 +251,13 @@ class ChatApp(App):
                 # Модель-чат: показываем историю из model_conversations
                 if contact and isinstance(contact, str) and contact.startswith("model:"):
                     model_id = contact.replace("model:", "")
-                    msgs = self.ws.model_conversations.get(model_id, [])
+                    conv_key = f"srv:{model_id}"
+                    msgs = self.ws.model_conversations.get(conv_key, [])
                     filtered = msgs
                 elif contact and isinstance(contact, str) and contact.startswith("usermodel:"):
                     model_id = contact.replace("usermodel:", "")
-                    msgs = self.ws.model_conversations.get(model_id, [])
+                    conv_key = f"usr:{model_id}"
+                    msgs = self.ws.model_conversations.get(conv_key, [])
                     filtered = msgs
                 elif self.ws.current_contact:
                     filtered = [msg for msg in self.ws.messages
@@ -630,6 +632,7 @@ class ChatApp(App):
         from datetime import datetime
         import uuid
 
+        conv_key = f"usr:{model_id}"
         logger.info(f"Sending user model message to {model_id}, content: {content[:50]}")
         logger.info(f"User models available: {[m['id'] for m in self.ws.user_models]}")
 
@@ -646,9 +649,9 @@ class ChatApp(App):
         # 1. Сохраняем сообщение пользователя
         user_msg = Message(content, is_mine=True, client_id=self.ws.client_id,
                            username=self.ws.username, message_id=msg_id, timestamp=timestamp)
-        if model_id not in self.ws.model_conversations:
-            self.ws.model_conversations[model_id] = []
-        self.ws.model_conversations[model_id].append(user_msg)
+        if conv_key not in self.ws.model_conversations:
+            self.ws.model_conversations[conv_key] = []
+        self.ws.model_conversations[conv_key].append(user_msg)
         self.ws.messages.append(user_msg)
 
         # 2. Создаём индикатор "thinking"
@@ -656,7 +659,7 @@ class ChatApp(App):
         thinking = Message("[thinking...]", is_mine=False, client_id=-1,
                            username=f"🔒 {model_name}", message_id=thinking_id,
                            timestamp=timestamp)
-        self.ws.model_conversations[model_id].append(thinking)
+        self.ws.model_conversations[conv_key].append(thinking)
         self.ws.messages.append(thinking)
 
         self.update_messages_display()
@@ -676,8 +679,8 @@ class ChatApp(App):
             # При первом чанке: удаляем thinking и создаём ответ
             if chunk and not accumulated["thinking_removed"]:
                 # Удаляем "[thinking...]"
-                self.ws.model_conversations[model_id] = [
-                    msg for msg in self.ws.model_conversations[model_id]
+                self.ws.model_conversations[conv_key] = [
+                    msg for msg in self.ws.model_conversations[conv_key]
                     if msg.message_id != thinking_id
                 ]
                 self.ws.messages = [
@@ -691,11 +694,11 @@ class ChatApp(App):
                                      username=f"🔒 {model_name}",
                                      message_id=f"{msg_id}_response",
                                      timestamp=timestamp)
-                self.ws.model_conversations[model_id].append(response_msg)
+                self.ws.model_conversations[conv_key].append(response_msg)
                 self.ws.messages.append(response_msg)
             elif chunk:
                 # Обновляем существующее сообщение при каждом chunk
-                for msg_list in [self.ws.model_conversations[model_id], self.ws.messages]:
+                for msg_list in [self.ws.model_conversations[conv_key], self.ws.messages]:
                     for msg in msg_list:
                         if msg.message_id == f"{msg_id}_response":
                             msg.content = accumulated["content"]
@@ -705,8 +708,8 @@ class ChatApp(App):
             if done:
                 if not accumulated["thinking_removed"]:
                     # Удаляем thinking, если ещё не удалили (пустой ответ)
-                    self.ws.model_conversations[model_id] = [
-                        msg for msg in self.ws.model_conversations[model_id]
+                    self.ws.model_conversations[conv_key] = [
+                        msg for msg in self.ws.model_conversations[conv_key]
                         if msg.message_id != thinking_id
                     ]
                     self.ws.messages = [
@@ -718,12 +721,12 @@ class ChatApp(App):
                                          username=f"🔒 {model_name}",
                                          message_id=f"{msg_id}_response",
                                          timestamp=timestamp)
-                    self.ws.model_conversations[model_id].append(response_msg)
+                    self.ws.model_conversations[conv_key].append(response_msg)
                     self.ws.messages.append(response_msg)
                 else:
                     # Финализируем уже существующее сообщение
                     final_content = accumulated["content"] if accumulated["content"] else "[no response]"
-                    for msg_list in [self.ws.model_conversations[model_id], self.ws.messages]:
+                    for msg_list in [self.ws.model_conversations[conv_key], self.ws.messages]:
                         msg_list[:] = [msg for msg in msg_list if msg.message_id != f"{msg_id}_response"]
                         response_msg = Message(final_content, is_mine=False, client_id=-1,
                                              username=f"🔒 {model_name}",
@@ -731,7 +734,7 @@ class ChatApp(App):
                                              timestamp=datetime.now().strftime("%H:%M"))
                         msg_list.append(response_msg)
 
-            # Обновляем отображение через call_later (безопасно для worker-потока)
+            # Обновляем отображение через call_later (worker в main event loop)
             self.call_later(self.update_messages_display)
 
         await self.ws.send_user_llm_request(model_id, messages, callback=internal_callback)
