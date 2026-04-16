@@ -24,8 +24,9 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
-	// Парсинг порта из CLI
+	// Парсинг аргументов CLI
 	port := flag.Int("port", common.DefaultPort, "Port to listen on")
+	modelsFile := flag.String("models", "models.json", "Path to LLM models config file")
 	flag.Parse()
 
 	// Настройка логирования
@@ -37,8 +38,20 @@ func main() {
 		defer logFile.Close()
 	}
 
+	// Загрузка конфигурации LLM-моделей
+	models, err := common.LoadModels(*modelsFile)
+	if err != nil {
+		log.Printf("Warning: failed to load LLM models config: %v (LLM features will be disabled)", err)
+		models = []common.ModelConfig{}
+	} else {
+		log.Printf("Loaded %d LLM model(s):", len(models))
+		for _, m := range models {
+			log.Printf("  - %s (%s) @ %s", m.ID, m.Name, m.BaseURL)
+		}
+	}
+
 	// Создание сервера
-	chatServer := server.NewChatServer(common.DefaultHost, *port)
+	chatServer := server.NewChatServer(common.DefaultHost, *port, models)
 
 	// Получение IP для отображения
 	publicIP := server.GetPublicIP()

@@ -22,6 +22,12 @@ MSG_ACK = "ack"
 MSG_SYSTEM = "system"
 MSG_PARTICIPANTS = "participants"
 
+# LLM-сообщения
+MSG_LLM_MODELS = "llm_models"     # S→C: список доступных моделей
+MSG_LLM_REQUEST = "llm_request"    # C→S: запрос к LLM
+MSG_LLM_CHUNK = "llm_chunk"        # S→C: часть streaming-ответа
+MSG_LLM_ERROR = "llm_error"        # S→C: ошибка LLM-запроса
+
 
 # ── Фабрики сообщений ──────────────────────────────────────
 
@@ -90,3 +96,14 @@ def make_participants(count: int, participants: list) -> str:
 
 def now_timestamp() -> str:
     return datetime.now().strftime("%H:%M")
+
+
+# ── Фабрики LLM-сообщений ─────────────────────────────────
+
+def make_llm_request(model_id: str, messages: list) -> str:
+    """C→S: запрос к LLM-модели с историей диалога."""
+    return json.dumps({
+        "type": MSG_LLM_REQUEST,
+        "model_id": model_id,
+        "messages": messages,  # [{"role": "user", "content": "..."}, ...]
+    })

@@ -7,9 +7,10 @@ import asyncio
 from typing import Optional, List
 
 from textual.app import App
-from textual.widgets import Label, Input, ListView, ListItem, TextArea, Tabs, Tab, Button
+from textual.widgets import Label, Input, ListView, ListItem, TextArea, Tabs, Tab, Button, RichLog
 
 from screens import LoginScreen, ChatScreen, CommandInput, CommandOverlay
+from llm_screen import LLMChatScreen
 from ws_client import WSClient
 from commands import registry
 
@@ -486,3 +487,51 @@ class ChatApp(App):
                 else:
                     self.run_worker(self.ws.send_broadcast(content), exclusive=True)
                     self.ws.unread_counts[0] = 0
+
+    # ── LLM методы ─────────────────────────────────────────
+
+    def update_llm_models(self) -> None:
+        """Вызывается при получении списка LLM-моделей от сервера."""
+        self.log(f"LLM models received: {[m['name'] for m in self.ws.available_models]}")
+        # Если сейчас открыт LLMChatScreen — обновляем селектор
+        try:
+            if isinstance(self.screen, LLMChatScreen):
+                self.screen._update_model_selector()
+        except Exception:
+            pass
+
+    def update_llm_stream(self, model_id: str, chunk: str, done: bool) -> None:
+        """Вызывается при получении чанка от LLM."""
+        try:
+            if isinstance(self.screen, LLMChatScreen):
+                self.screen._on_llm_chunk(chunk, done)
+
+                # Обновляем RichLog на экране
+                messages_widget = self.screen.query_one("#llm-messages", RichLog)
+                if done:
+                    # Завершаем строку
+                    messages_widget.write("\n")
+                    self.screen._set_streaming_status(False)
+                else:
+                    # Дописываем chunk в ту же строку (без newline)
+                    messages_widget.write(chunk)
+        except Exception as e:
+            self.log(f"LLM stream update error: {e}")
+
+    def update_llm_error(self, model_id: str, error: str) -> None:
+        """Вызывается при ошибке LLM-запроса."""
+        self.notify(f"LLM error: {error}", severity="error")
+        try:
+            if isinstance(self.screen, LLMChatScreen):
+                messages_widget = self.screen.query_one("#llm-messages", RichLog)
+                messages_widget.write(f"[bold red][Error: {error}][/bold red]\n")
+                self.screen._set_streaming_status(False)
+        except Exception:
+            pass
+
+    def open_llm_chat(self) -> None:
+        """Открыть экран LLM-чата."""
+        if not self.ws.available_models:
+            self.notify("No LLM models available on the server", severity="warning")
+            return
+        self.push_screen(LLMChatScreen(self))

@@ -14,7 +14,8 @@ import websockets
 from protocol import (
     MSG_CONNECT, MSG_CONNECTED, MSG_MESSAGE, MSG_DIRECT,
     MSG_ACK, MSG_SYSTEM, MSG_PARTICIPANTS,
-    make_connect, make_message,
+    MSG_LLM_MODELS, MSG_LLM_CHUNK, MSG_LLM_ERROR,
+    make_connect, make_message, make_llm_request,
 )
 from crypto import (
     generate_keypair, load_public_key, derive_shared_key,
@@ -52,6 +53,11 @@ class WSClient:
         self.pending_messages = {}         # message_id → Message (ждём ack)
         self.unread_counts: Dict[int, int] = defaultdict(int)
         self.current_contact: Optional[int] = None
+
+        # LLM-состояние
+        self.available_models: list = []   # [{"id": ..., "name": ...}, ...]
+        self.llm_streaming = False         # идёт ли сейчас streaming
+        self.llm_callbacks: Dict[str, list] = {}  # model_id → [callback(chunk, done), ...]
 
     # ── Подключение ─────────────────────────────────────────
 
@@ -188,6 +194,15 @@ class WSClient:
                 elif msg_type == MSG_PARTICIPANTS:
                     self._handle_participants(message)
 
+                elif msg_type == MSG_LLM_MODELS:
+                    self._handle_llm_models(message)
+
+                elif msg_type == MSG_LLM_CHUNK:
+                    self._handle_llm_chunk(message)
+
+                elif msg_type == MSG_LLM_ERROR:
+                    self._handle_llm_error(message)
+
         except websockets.ConnectionClosed:
             logger.info("WebSocket connection closed")
         except Exception as e:
@@ -298,3 +313,66 @@ class WSClient:
 
         logger.info(f"Participants updated: {[(cid, d['username']) for cid, d in self.participants.items()]}")
         self.app.call_later(self.app.update_contacts_list)
+
+    # ── LLM обработка ──────────────────────────────────────
+
+    def _handle_llm_models(self, message: dict):
+        """S→C: список доступных LLM-моделей."""
+        self.available_models = message.get("models", [])
+        logger.info(f"Received {len(self.available_models)} LLM model(s): {[m['name'] for m in self.available_models]}")
+        self.app.call_later(self.app.update_llm_models)
+
+    def _handle_llm_chunk(self, message: dict):
+        """S→C: часть streaming-ответа от LLM."""
+        model_id = message.get("model_id", "")
+        chunk = message.get("chunk", "")
+        done = message.get("done", False)
+
+        self.llm_streaming = not done
+
+        # Вызываем зарегистрированные callback'и
+        callbacks = self.llm_callbacks.get(model_id, [])
+        for callback in callbacks:
+            try:
+                callback(chunk, done)
+            except Exception as e:
+                logger.error(f"LLM callback error: {e}")
+
+        # Уведомляем приложение для обновления UI
+        self.app.call_later(self.app.update_llm_stream, model_id, chunk, done)
+
+        if done:
+            self.llm_callbacks.pop(model_id, None)
+            logger.info(f"LLM streaming for {model_id} completed")
+
+    def _handle_llm_error(self, message: dict):
+        """S→C: ошибка LLM-запроса."""
+        model_id = message.get("model_id", "")
+        error = message.get("error", "Unknown error")
+        logger.error(f"LLM error for {model_id}: {error}")
+        self.app.call_later(self.app.update_llm_error, model_id, error)
+
+        # Уведомляем callback'и об ошибке
+        callbacks = self.llm_callbacks.get(model_id, [])
+        for callback in callbacks:
+            try:
+                callback("", True)  # done = True
+            except Exception:
+                pass
+        self.llm_callbacks.pop(model_id, None)
+
+    # ── LLM отправка запроса ───────────────────────────────
+
+    async def send_llm_request(self, model_id: str, messages: list, callback=None):
+        """C→S: отправить запрос к LLM-модели."""
+        if callback:
+            if model_id not in self.llm_callbacks:
+                self.llm_callbacks[model_id] = []
+            self.llm_callbacks[model_id].append(callback)
+
+        payload = make_llm_request(model_id, messages)
+        try:
+            await self.websocket.send(payload)
+            logger.info(f"Sent LLM request for model {model_id}")
+        except websockets.ConnectionClosed:
+            self.app.notify("Connection lost!", severity="error")

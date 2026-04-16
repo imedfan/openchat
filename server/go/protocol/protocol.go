@@ -15,6 +15,12 @@ const (
 	MsgAck         = "ack"
 	MsgSystem      = "system"
 	MsgParticipants = "participants"
+	// LLM-сообщения
+	MsgLLMModels  = "llm_models"  // S→C: список доступных моделей
+	MsgLLMRequest = "llm_request"  // C→S: запрос к LLM
+	MsgLLMChunk    = "llm_chunk"   // S→C: часть streaming-ответа
+	MsgLLMError    = "llm_error"   // S→C: ошибка LLM-запроса
+	MsgLLMDone     = "llm_done"    // S→C: завершение streaming-ответа
 )
 
 // ── JSON структуры сообщений ──────────────────────────────
@@ -98,6 +104,48 @@ type DirectRelayMessage struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// ── LLM структуры сообщений ──────────────────────────────
+
+// LLMModelInfo — информация о модели (для списка)
+type LLMModelInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// LLMModelsResponse — S→C: список доступных моделей
+type LLMModelsResponse struct {
+	Type   string         `json:"type"`
+	Models []LLMModelInfo `json:"models"`
+}
+
+// LLMMessage — одно сообщение в диалоге (как в OpenAI API)
+type LLMMessage struct {
+	Role    string `json:"role"`    // "system", "user", "assistant"
+	Content string `json:"content"` // текст сообщения
+}
+
+// LLMRequest — C→S: запрос к LLM-модели
+type LLMRequest struct {
+	Type     string        `json:"type"`
+	ModelID  string        `json:"model_id"`  // ID модели из конфига
+	Messages []LLMMessage  `json:"messages"`  // история диалога
+}
+
+// LLMChunk — S→C: часть streaming-ответа от LLM
+type LLMChunk struct {
+	Type    string `json:"type"`
+	ModelID string `json:"model_id"` // ID модели
+	Chunk   string `json:"chunk"`    // фрагмент текста
+	Done    bool   `json:"done"`     // true = последний чанк
+}
+
+// LLMError — S→C: ошибка LLM-запроса
+type LLMError struct {
+	Type    string `json:"type"`
+	ModelID string `json:"model_id"`
+	Error   string `json:"error"`
+}
+
 // ── Фабрики сообщений ─────────────────────────────────────
 
 func MakeConnected(clientID int, participantCount int) string {
@@ -165,6 +213,46 @@ func MakeDirectRelay(clientID int, username string, targetID int, content string
 	}
 	data, _ := json.Marshal(msg)
 	return string(data)
+}
+
+// ── Фабрики LLM-сообщений ────────────────────────────────
+
+// MakeLLMModels — S→C: список доступных моделей
+func MakeLLMModels(models []LLMModelInfo) string {
+	msg := LLMModelsResponse{
+		Type:   MsgLLMModels,
+		Models: models,
+	}
+	data, _ := json.Marshal(msg)
+	return string(data)
+}
+
+// MakeLLMChunk — S→C: часть streaming-ответа
+func MakeLLMChunk(modelID string, chunk string, done bool) string {
+	msg := LLMChunk{
+		Type:    MsgLLMChunk,
+		ModelID: modelID,
+		Chunk:   chunk,
+		Done:    done,
+	}
+	data, _ := json.Marshal(msg)
+	return string(data)
+}
+
+// MakeLLMError — S→C: ошибка LLM-запроса
+func MakeLLMError(modelID string, errMsg string) string {
+	msg := LLMError{
+		Type:    MsgLLMError,
+		ModelID: modelID,
+		Error:   errMsg,
+	}
+	data, _ := json.Marshal(msg)
+	return string(data)
+}
+
+// MakeLLMDone — S→C: завершение streaming-ответа (alias для chunk с done=true и пустым текстом)
+func MakeLLMDone(modelID string) string {
+	return MakeLLMChunk(modelID, "", true)
 }
 
 // ParseMessage — парсит JSON в map для определения типа

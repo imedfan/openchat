@@ -46,6 +46,10 @@ func (s *ChatServer) HandleClient(conn *websocket.Conn) {
 			if client != nil {
 				s.HandleDirect(client, msg)
 			}
+		case protocol.MsgLLMRequest:
+			if client != nil {
+				s.HandleLLMRequest(client, msg)
+			}
 		}
 	}
 }
@@ -74,6 +78,11 @@ func (s *ChatServer) HandleConnect(conn *websocket.Conn, msg map[string]interfac
 
 	// Рассылаем обновлённый список участников остальным
 	s.SendParticipantsToAll([]int{client.ID})
+
+	// Отправляем список доступных LLM-моделей
+	if len(s.Models) > 0 {
+		s.HandleLLMModels(client)
+	}
 
 	return client
 }

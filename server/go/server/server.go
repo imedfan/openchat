@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"openchat-server/common"
 	"openchat-server/protocol"
 )
 
@@ -22,18 +23,20 @@ type ClientInfo struct {
 type ChatServer struct {
 	Host            string
 	Port            int
-	Clients         map[int]*ClientInfo // client_id → ClientInfo
+	Clients         map[int]*ClientInfo    // client_id → ClientInfo
 	ClientIDCounter int
 	Mu              sync.RWMutex
+	Models          []common.ModelConfig // Доступные LLM-модели
 }
 
 // NewChatServer создаёт новый сервер
-func NewChatServer(host string, port int) *ChatServer {
+func NewChatServer(host string, port int, models []common.ModelConfig) *ChatServer {
 	return &ChatServer{
 		Host:            host,
 		Port:            port,
 		Clients:         make(map[int]*ClientInfo),
 		ClientIDCounter: 1,
+		Models:          models,
 	}
 }
 
