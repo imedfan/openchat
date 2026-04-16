@@ -4,7 +4,7 @@
 
 from typing import List, Optional
 
-from client.commands import ChatCommand, registry
+from commands import ChatCommand, registry
 
 
 # ── /command ───────────────────────────────────────────────

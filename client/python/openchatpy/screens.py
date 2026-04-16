@@ -13,8 +13,8 @@ from typing import Optional, List
 import random
 import asyncio
 
-from common.protocol import DEFAULT_IP, DEFAULT_PORT
-from client.commands import registry
+from protocol import DEFAULT_IP, DEFAULT_PORT
+from commands import registry
 
 
 # ── Banner: "OpenChat" block-art с градиентом и тенью ──────

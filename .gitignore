@@ -1,19 +1,30 @@
-# Logs
-*.log
-
-# PyInstaller
+# === Build artifacts ===
 dist/
 build/
 *.spec
+*.exe
 
-# Python cache
+# === Python cache ===
 __pycache__/
 **/__pycache__/
 *.pyc
 
-# Qwen
+# === Logs ===
+*.log
+
+# === Old / archived code (not tracked) ===
+old/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Qwen ===
 .qwen/
 qwen-code-export-*.md
 
-# Pytest
+# === Pytest ===
 .pytest_cache/
+
+# === Go (server) ===
+server/go/openchat-server.exe

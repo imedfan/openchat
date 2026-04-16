@@ -9,9 +9,9 @@ from typing import Optional, List
 from textual.app import App
 from textual.widgets import Label, Input, ListView, ListItem, TextArea, Tabs, Tab, Button
 
-from client.screens import LoginScreen, ChatScreen, CommandInput, CommandOverlay
-from client.ws_client import WSClient
-from client.commands import registry
+from screens import LoginScreen, ChatScreen, CommandInput, CommandOverlay
+from ws_client import WSClient
+from commands import registry
 
 logger = logging.getLogger(__name__)
 

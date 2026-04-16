@@ -11,12 +11,12 @@ from typing import Dict, Optional, FrozenSet
 
 import websockets
 
-from common.protocol import (
+from protocol import (
     MSG_CONNECT, MSG_CONNECTED, MSG_MESSAGE, MSG_DIRECT,
     MSG_ACK, MSG_SYSTEM, MSG_PARTICIPANTS,
     make_connect, make_message,
 )
-from common.crypto import (
+from crypto import (
     generate_keypair, load_public_key, derive_shared_key,
     encrypt_message, decrypt_message,
 )
@@ -117,7 +117,7 @@ class WSClient:
             self.app.notify("Connection lost!", severity="error")
             return
 
-        from client.app import Message
+        from app import Message
         msg = Message(content, is_mine=True, client_id=self.client_id,
                       username=self.username, message_id=msg_id,
                       timestamp=datetime.now().strftime("%H:%M"))
@@ -155,7 +155,7 @@ class WSClient:
             self.app.notify("Connection lost!", severity="error")
             return
 
-        from client.app import Message
+        from app import Message
         msg = Message(content, is_mine=True, client_id=self.client_id,
                       username=self.username, is_direct=True, target_id=target_id,
                       message_id=msg_id, timestamp=datetime.now().strftime("%H:%M"))
@@ -216,7 +216,7 @@ class WSClient:
             logger.info(f"Message {msg_id} acknowledged")
 
     def _handle_broadcast(self, message: dict):
-        from client.app import Message
+        from app import Message
         client_id = message.get("client_id")
         username = message.get("username", "")
         content = message.get("content", "")
@@ -235,7 +235,7 @@ class WSClient:
         logger.info(f"Received broadcast from {client_id}: {content[:50]}")
 
     def _handle_direct(self, message: dict):
-        from client.app import Message
+        from app import Message
         client_id = message.get("client_id")
         username = message.get("username", "")
         ciphertext_b64 = message.get("content", "")
@@ -264,7 +264,7 @@ class WSClient:
         logger.info(f"Received DM from {client_id}: [decrypted]")
 
     def _handle_system(self, message: dict):
-        from client.app import Message
+        from app import Message
         content = message.get("message", "")
         timestamp = message.get("timestamp", "")
         msg = Message(content, is_mine=False, client_id=0, timestamp=timestamp)

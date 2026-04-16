@@ -4,8 +4,8 @@ OpenChat Client — точка входа.
 
 import logging
 
-from client.app import ChatApp
-from client.commands.builtin import register_builtin_commands
+from app import ChatApp
+from commands.builtin import register_builtin_commands
 
 logging.basicConfig(
     level=logging.INFO,

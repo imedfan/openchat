@@ -1,0 +1,15 @@
+# Binaries
+openchat-server
+openchat-server.exe
+
+# Go
+go.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
