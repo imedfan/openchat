@@ -253,6 +253,10 @@ class ChatApp(App):
                     model_id = contact.replace("model:", "")
                     msgs = self.ws.model_conversations.get(model_id, [])
                     filtered = msgs
+                elif contact and isinstance(contact, str) and contact.startswith("usermodel:"):
+                    model_id = contact.replace("usermodel:", "")
+                    msgs = self.ws.model_conversations.get(model_id, [])
+                    filtered = msgs
                 elif self.ws.current_contact:
                     filtered = [msg for msg in self.ws.messages
                                 if (msg.client_id == self.ws.current_contact and msg.is_direct) or
@@ -471,12 +475,7 @@ class ChatApp(App):
                         model = m
                         break
                 if model:
-                    messages = [{"role": "user", "content": content}]
-                    self.run_worker(
-                        self.ws.send_user_llm_request(model_id, messages,
-                                                     callback=lambda chunk, done: None),
-                        exclusive=True
-                    )
+                    self.run_worker(self._send_user_model_message(model_id, content), exclusive=True)
             elif contact:
                 self.run_worker(self.ws.send_direct(contact, content), exclusive=True)
             else:
@@ -617,11 +616,7 @@ class ChatApp(App):
                 # Модель-чат (личная модель)
                 elif contact and isinstance(contact, str) and contact.startswith("usermodel:"):
                     model_id = contact.replace("usermodel:", "")
-                    messages = [{"role": "user", "content": content}]
-                    self.run_worker(
-                        self.ws.send_user_llm_request(model_id, messages),
-                        exclusive=True
-                    )
+                    self.run_worker(self._send_user_model_message(model_id, content), exclusive=True)
                 elif contact:
                     self.run_worker(self.ws.send_direct(contact, content), exclusive=True)
                 else:
@@ -629,6 +624,117 @@ class ChatApp(App):
                     self.ws.unread_counts[0] = 0
 
     # ── LLM методы ─────────────────────────────────────────
+
+    async def _send_user_model_message(self, model_id: str, content: str):
+        """Отправить сообщение в чат личной модели с сохранением истории."""
+        from datetime import datetime
+        import uuid
+
+        logger.info(f"Sending user model message to {model_id}, content: {content[:50]}")
+        logger.info(f"User models available: {[m['id'] for m in self.ws.user_models]}")
+
+        msg_id = f"umodel_{model_id}_{uuid.uuid4().hex[:8]}"
+        timestamp = datetime.now().strftime("%H:%M")
+
+        # Находим модель для получения имени
+        model_name = model_id
+        for m in self.ws.user_models:
+            if m["id"] == model_id:
+                model_name = m.get("name", model_id)
+                break
+
+        # 1. Сохраняем сообщение пользователя
+        user_msg = Message(content, is_mine=True, client_id=self.ws.client_id,
+                           username=self.ws.username, message_id=msg_id, timestamp=timestamp)
+        if model_id not in self.ws.model_conversations:
+            self.ws.model_conversations[model_id] = []
+        self.ws.model_conversations[model_id].append(user_msg)
+        self.ws.messages.append(user_msg)
+
+        # 2. Создаём индикатор "thinking"
+        thinking_id = f"{msg_id}_thinking"
+        thinking = Message("[thinking...]", is_mine=False, client_id=-1,
+                           username=f"🔒 {model_name}", message_id=thinking_id,
+                           timestamp=timestamp)
+        self.ws.model_conversations[model_id].append(thinking)
+        self.ws.messages.append(thinking)
+
+        self.update_messages_display()
+
+        # 3. Создаём переменную для накопления контента и флага
+        accumulated = {"content": "", "thinking_removed": False}
+
+        # 4. Отправляем запрос и обрабатываем поток ответов
+        messages = [{"role": "user", "content": content}]
+
+        # Синхронный callback (вызывается из worker-потока aiohttp)
+        def internal_callback(chunk: str, done: bool):
+            # Accumulate контент
+            if chunk:
+                accumulated["content"] += chunk
+
+            # При первом чанке: удаляем thinking и создаём ответ
+            if chunk and not accumulated["thinking_removed"]:
+                # Удаляем "[thinking...]"
+                self.ws.model_conversations[model_id] = [
+                    msg for msg in self.ws.model_conversations[model_id]
+                    if msg.message_id != thinking_id
+                ]
+                self.ws.messages = [
+                    msg for msg in self.ws.messages
+                    if msg.message_id != thinking_id
+                ]
+                accumulated["thinking_removed"] = True
+
+                # Создаём сообщение ответа
+                response_msg = Message(accumulated["content"], is_mine=False, client_id=-1,
+                                     username=f"🔒 {model_name}",
+                                     message_id=f"{msg_id}_response",
+                                     timestamp=timestamp)
+                self.ws.model_conversations[model_id].append(response_msg)
+                self.ws.messages.append(response_msg)
+            elif chunk:
+                # Обновляем существующее сообщение при каждом chunk
+                for msg_list in [self.ws.model_conversations[model_id], self.ws.messages]:
+                    for msg in msg_list:
+                        if msg.message_id == f"{msg_id}_response":
+                            msg.content = accumulated["content"]
+                            break
+
+            # При завершении финализируем сообщение
+            if done:
+                if not accumulated["thinking_removed"]:
+                    # Удаляем thinking, если ещё не удалили (пустой ответ)
+                    self.ws.model_conversations[model_id] = [
+                        msg for msg in self.ws.model_conversations[model_id]
+                        if msg.message_id != thinking_id
+                    ]
+                    self.ws.messages = [
+                        msg for msg in self.ws.messages
+                        if msg.message_id != thinking_id
+                    ]
+                    # Создаём финальное сообщение с пустым контентом
+                    response_msg = Message("[no response]", is_mine=False, client_id=-1,
+                                         username=f"🔒 {model_name}",
+                                         message_id=f"{msg_id}_response",
+                                         timestamp=timestamp)
+                    self.ws.model_conversations[model_id].append(response_msg)
+                    self.ws.messages.append(response_msg)
+                else:
+                    # Финализируем уже существующее сообщение
+                    final_content = accumulated["content"] if accumulated["content"] else "[no response]"
+                    for msg_list in [self.ws.model_conversations[model_id], self.ws.messages]:
+                        msg_list[:] = [msg for msg in msg_list if msg.message_id != f"{msg_id}_response"]
+                        response_msg = Message(final_content, is_mine=False, client_id=-1,
+                                             username=f"🔒 {model_name}",
+                                             message_id=f"{msg_id}_response",
+                                             timestamp=datetime.now().strftime("%H:%M"))
+                        msg_list.append(response_msg)
+
+            # Обновляем отображение через call_later (безопасно для worker-потока)
+            self.call_later(self.update_messages_display)
+
+        await self.ws.send_user_llm_request(model_id, messages, callback=internal_callback)
 
     def update_llm_models(self) -> None:
         """Вызывается при получении списка LLM-моделей от сервера."""

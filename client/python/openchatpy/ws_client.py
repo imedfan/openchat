@@ -213,6 +213,10 @@ class WSClient:
                 msg_type = message.get("type")
                 logger.info(f"Received msg type={msg_type}")
 
+                # Логируем типы LLM-сообщений
+                if msg_type in [MSG_LLM_MODELS, MSG_LLM_CHUNK, MSG_LLM_ERROR, MSG_MODEL_RESPONSE]:
+                    logger.info(f"Received LLM message type: {msg_type}")
+
                 if msg_type == MSG_ACK:
                     self._handle_ack(message)
 
@@ -408,6 +412,12 @@ class WSClient:
 
         self.llm_streaming = not done
 
+        # Логируем первый чанк и завершение потока
+        if chunk and not done:
+            logger.info(f"LLM chunk received for {model_id}: {chunk[:50]}")
+        elif done:
+            logger.info(f"LLM streaming completed for {model_id}")
+
         # Вызываем зарегистрированные callback'и
         callbacks = self.llm_callbacks.get(model_id, [])
         for callback in callbacks:
@@ -501,24 +511,59 @@ class WSClient:
         stream = message.get("stream", False)
         timestamp = message.get("timestamp", "")
 
+        # Находим и удаляем сообщение "[thinking...]" из истории
+        if model_id in self.model_conversations:
+            # Ищем сообщение "[thinking...]" по шаблону ID (исходный msg_id + "_thinking")
+            thinking_msg_id = None
+            for msg in self.model_conversations[model_id]:
+                if msg.content == "[thinking...]" and msg.message_id.startswith(f"{model_id}_"):
+                    thinking_msg_id = msg.message_id
+                    break
+            
+            if thinking_msg_id:
+                # Удаляем сообщение "[thinking...]", оставляя только реальный ответ
+                self.model_conversations[model_id] = [
+                    msg for msg in self.model_conversations[model_id] 
+                    if msg.message_id != thinking_msg_id
+                ]
+
+        # Добавляем ответ модели как новое сообщение
+        from app import Message
+        response_msg = Message(content, is_mine=False, client_id=-1,
+                             username=f"🤖 {model_name}", message_id=f"{model_id}_resp_{len(self.messages)}",
+                             timestamp=datetime.now().strftime("%H:%M"))
+        
+        if model_id not in self.model_conversations:
+            self.model_conversations[model_id] = []
+        self.model_conversations[model_id].append(response_msg)
+        self.messages.append(response_msg)
+        
+        # Обновляем отображение сообщений
+        self.app.call_later(self.app.update_messages_display)
+        
+        # Добавляем логирование
+        logger.info(f"Model {model_name} response: {content[:50]}")
+
     async def send_user_llm_request(self, model_id: str, messages: list, callback=None):
         """Прямой HTTP SSE запрос к LLM API для личных моделей."""
+        logger.info(f"send_user_llm_request called for {model_id}")
+
         # Находим модель в user_models по id
         model = None
         for m in self.user_models:
             if m["id"] == model_id:
                 model = m
                 break
-        
+
         if not model:
-            logger.error(f"User model {model_id} not found")
+            logger.error(f"User model {model_id} not found in user_models")
             if callback:
                 try:
                     callback("", True)  # done = True
                 except Exception:
                     pass
             return
-        
+
         base_url = model.get("baseUrl", "").rstrip("/")
         if not base_url:
             logger.error(f"No baseUrl for user model {model_id}")
@@ -528,26 +573,34 @@ class WSClient:
                 except Exception:
                     pass
             return
-        
-        # Формируем URL
+
+        # Формируем URL — нормализуем baseUrl (убираем trailing /v1 если есть)
+        base_url = base_url.rstrip("/").removesuffix("/v1")
         url = f"{base_url}/v1/chat/completions"
-        
+
         # Подготавливаем headers
         headers = {
             "Content-Type": "application/json"
         }
-        
+
+        # Получаем API-ключ: сначала из переменной окружения, потом используем envKey как fallback
         env_key_name = model.get("envKey", "OPENAI_API_KEY")
-        api_key = None
-        if env_key_name and env_key_name in os.environ:
-            api_key = os.environ[env_key_name]
-        
+        api_key = os.getenv(env_key_name)  # сначала пытаемся получить из переменной окружения
+
+        # Если переменная окружения не найдена, используем значение envKey как сам ключ
+        if not api_key:
+            api_key = env_key_name
+
+        logger.info(f"API key found: {'yes' if api_key else 'no'} (envKey={env_key_name})")
+        logger.info(f"Full URL: {url}")
+        logger.info(f"Model ID in payload: {model.get('id', model_id)}")
+
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         
         # Подготавливаем payload
         payload = {
-            "model": model.get("name", model_id),
+            "model": model.get("id", model_id),  # используем ID модели, а не отображаемое имя
             "messages": messages,
             "stream": True
         }
@@ -585,6 +638,7 @@ class WSClient:
                             data = line[6:]  # убираем "data: "
                             if data == b"[DONE]":
                                 # Завершение потока
+                                logger.info(f"User model response completed for {model_id}")
                                 if model_id in self.llm_callbacks:
                                     callbacks = self.llm_callbacks.pop(model_id, [])
                                     for cb in callbacks:
@@ -602,6 +656,9 @@ class WSClient:
                                     delta = chunk_data["choices"][0].get("delta", {})
                                     content = delta.get("content", "")
                                     if content:
+                                        # Логируем первый чанк
+                                        if model_id in self.llm_callbacks:
+                                            logger.info(f"User model response chunk for {model_id}: {content[:50]}")
                                         # Вызываем callback для каждого chunk
                                         if model_id in self.llm_callbacks:
                                             for cb in self.llm_callbacks[model_id]:
@@ -620,54 +677,3 @@ class WSClient:
                         except Exception:
                             pass
                 self.llm_callbacks.pop(model_id, None)
-
-        from app import Message
-
-        if model_id not in self.model_conversations:
-            self.model_conversations[model_id] = []
-
-        if stream and not done:
-            # Streaming chunk — обновляем последний message модели
-            # Находим последнее сообщение модели (thinking или chunk)
-            last_msgs = self.model_conversations[model_id]
-            for i in range(len(last_msgs) - 1, -1, -1):
-                if not last_msgs[i].is_mine and last_msgs[i].client_id == -1:
-                    # Это наше thinking/chunk сообщение — обновляем
-                    if content:
-                        if last_msgs[i].content == "[thinking...]":
-                            last_msgs[i].content = content
-                        else:
-                            last_msgs[i].content += content
-                    break
-            else:
-                # Нет сообщения для обновления — создаём новую
-                chunk_msg = Message(content, is_mine=False, client_id=-1,
-                                    username=f"🤖 {model_name}",
-                                    timestamp=timestamp)
-                self.model_conversations[model_id].append(chunk_msg)
-                self.messages.append(chunk_msg)
-        elif done:
-            # Завершение — помечаем последнее thinking как done
-            last_msgs = self.model_conversations[model_id]
-            for i in range(len(last_msgs) - 1, -1, -1):
-                if not last_msgs[i].is_mine and last_msgs[i].client_id == -1:
-                    if last_msgs[i].content == "[thinking...]":
-                        last_msgs[i].content = "[done]"
-                    break
-            else:
-                # Создаём финальное сообщение
-                done_msg = Message("", is_mine=False, client_id=-1,
-                                   username=f"🤖 {model_name}",
-                                   timestamp=timestamp)
-                self.model_conversations[model_id].append(done_msg)
-                self.messages.append(done_msg)
-        else:
-            # Non-streaming полный ответ
-            resp_msg = Message(content, is_mine=False, client_id=-1,
-                               username=f"🤖 {model_name}",
-                               timestamp=timestamp)
-            self.model_conversations[model_id].append(resp_msg)
-            self.messages.append(resp_msg)
-
-        self.app.call_later(self.app.update_messages_display)
-        logger.info(f"Model response from {model_id}: {'done' if done else 'streaming'}")
