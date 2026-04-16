@@ -82,12 +82,18 @@ func (s *ChatServer) HandleLLMRequest(client *ClientInfo, msg map[string]interfa
 	llmClient := NewLLMClient(*modelConfig)
 
 	go func() {
+		firstChunkLogged := false
 		err := llmClient.StreamMessage(messages, func(chunk string, done bool) {
 			if done {
 				payload := protocol.MakeLLMChunk(modelID, "", true)
 				client.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
 				log.Printf("LLM streaming to client %d completed (model: %s)", client.ID, modelID)
 				return
+			}
+
+			if !firstChunkLogged && chunk != "" {
+				log.Printf("LLM first chunk for client %d (model %s): %s", client.ID, modelID, truncateString(chunk, 50))
+				firstChunkLogged = true
 			}
 
 			payload := protocol.MakeLLMChunk(modelID, chunk, false)

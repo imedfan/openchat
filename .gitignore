@@ -33,6 +33,7 @@ server/go/openchat-server.exe
 builds/
 !builds/.gitkeep
 
-# === User models (may contain API keys) ===
+# === Model config files (may contain API keys) ===
+server/go/models.json
 client/python/openchatpy/models_user.json
 !client/python/openchatpy/models_user.json.example

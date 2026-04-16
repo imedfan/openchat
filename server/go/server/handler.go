@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"log"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"openchat-server/common"
@@ -13,90 +12,133 @@ import (
 // HandleClient обрабатывает подключение одного клиента
 func (s *ChatServer) HandleClient(conn *websocket.Conn) {
 	var client *ClientInfo
-	
-	// Настройка Ping/Pong обработчиков для предотвращения обрывов соединения
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
-	conn.SetPingHandler(func(string) error {
-		// Когда сервер получает ping от клиента, он отвечает pong
-		return conn.WriteMessage(websocket.PongMessage, []byte{})
-	})
+
+	// Обёртка с мьютексом — ОДИН экземпляр на всё подключение
+	connMu := NewConnMutex(conn)
 
 	defer func() {
 		if client != nil {
 			s.HandleDisconnect(client.ID)
 		}
-		conn.Close()
+		connMu.Close()
 	}()
 
-	// Таймер для периодической отправки ping клиентам
-	heartbeat := time.NewTicker(30 * time.Second)
-	defer heartbeat.Stop()
-
 	for {
-		select {
-		case <-heartbeat.C:
-			// Периодически отправляем ping клиентам, чтобы проверить соединение
-			if err := conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-				log.Printf("Heartbeat error: %v", err)
-				return
+		_, message, err := connMu.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Printf("WebSocket error: %v", err)
 			}
-		default:
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-					log.Printf("WebSocket error: %v", err)
-			}
-				break
-			}
+			return
+		}
 
-			msg, err := protocol.ParseMessage(string(message))
-			if err != nil {
-				log.Printf("Failed to parse message: %v", err)
+		// Парсим JSON
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("Failed to parse message: %v", err)
+			continue
+		}
+
+		// Получаем тип сообщения
+		msgType := protocol.GetMsgType(msg)
+
+		switch msgType {
+		case protocol.MsgConnect:
+			var connectMsg protocol.ConnectMessage
+			if err := json.Unmarshal(message, &connectMsg); err != nil {
+				log.Printf("Failed to parse connect message: %v", err)
 				continue
 			}
+			// Конвертируем publicKey из string в []byte
+			publicKey := []byte(connectMsg.PublicKey)
+			client = s.AddClient(connectMsg.Username, publicKey, connMu)
 
-			msgType := protocol.GetMsgType(msg)
+			// Получаем количество участников
+			participantCount := s.ClientCount()
 
-			switch msgType {
-			case protocol.MsgConnect:
-				client = s.HandleConnect(conn, msg)
-			case protocol.MsgMessage:
-				if client != nil {
-					s.HandleBroadcast(client, msg)
-				}
-			case protocol.MsgDirect:
-				if client != nil {
-					s.HandleDirect(client, msg)
-				}
-			case protocol.MsgModelMessage:
-				if client != nil {
-					s.HandleModelMessage(client, msg)
-				}
-			case protocol.MsgLLMRequest:
-				if client != nil {
-					s.HandleLLMRequest(client, msg)
-				}
+			// Отправляем подтверждение подключения
+			payload := protocol.MakeConnected(client.ID, participantCount)
+			connMu.WriteMessage(websocket.TextMessage, []byte(payload))
+
+			log.Printf("Client %d (%s) connected", client.ID, connectMsg.Username)
+
+			// Отправляем список участников новому клиенту
+			if err := s.SendParticipantsTo(client); err != nil {
+				log.Printf("Failed to send participants to new client %d: %v", client.ID, err)
 			}
+
+			// Уведомляем остальных о новом участнике
+			joinMsg := protocol.MakeSystemMessage(connectMsg.Username + " joined the chat")
+			s.Broadcast(joinMsg, []int{client.ID})
+
+			// Рассылаем обновлённый список участников остальным
+			s.SendParticipantsToAll([]int{client.ID})
+
+			// Отправляем список доступных LLM-моделей
+			if len(s.Models) > 0 {
+				s.HandleLLMModels(client)
+			}
+
+		case protocol.MsgMessage:
+			if client != nil {
+				msgStruct := struct {
+					Content   string `json:"content"`
+					MessageID string `json:"message_id"`
+				}{
+					Content:   msg["content"].(string),
+					MessageID: msg["message_id"].(string),
+				}
+				s.HandleBroadcast(client, map[string]interface{}{
+					"content":     msgStruct.Content,
+					"message_id":  msgStruct.MessageID,
+				})
+			}
+
+		case protocol.MsgDirect:
+			if client != nil {
+				msgStruct := struct {
+					TargetID  int    `json:"target_id"`
+					Content   string `json:"content"`
+					MessageID string `json:"message_id"`
+					Encrypted bool   `json:"encrypted"`
+				}{
+					TargetID:  int(msg["target_id"].(float64)),
+					Content:   msg["content"].(string),
+					MessageID: msg["message_id"].(string),
+					Encrypted: msg["encrypted"].(bool),
+				}
+				s.HandleDirect(client, map[string]interface{}{
+					"to":         msgStruct.TargetID,
+					"content":    msgStruct.Content,
+					"message_id": msgStruct.MessageID,
+					"encrypted":  msgStruct.Encrypted,
+				})
+			}
+
+		case protocol.MsgModelMessage:
+			if client != nil {
+				s.HandleModelMessage(client, msg)
+			}
+
+		case protocol.MsgLLMRequest:
+			if client != nil {
+				s.HandleLLMRequest(client, msg)
+			}
+		default:
+			log.Printf("Unknown message type: %s", msgType)
 		}
 	}
 }
 
 // HandleConnect обрабатывает подключение нового клиента
-func (s *ChatServer) HandleConnect(conn *websocket.Conn, msg map[string]interface{}) *ClientInfo {
-	username, _ := msg["username"].(string)
-	publicKeyStr, _ := msg["public_key"].(string)
-	publicKey := []byte(publicKeyStr)
-
-	client := s.AddClient(username, publicKey, conn)
+func (s *ChatServer) HandleConnect(conn *websocket.Conn, msg *protocol.ConnectMessage) *ClientInfo {
+	connMu := NewConnMutex(conn)
+	client := s.AddClient(msg.Username, []byte(msg.PublicKey), connMu)
 	participantCount := s.ClientCount()
 
 	// Отправляем подтверждение подключения
-	conn.WriteMessage(websocket.TextMessage, []byte(protocol.MakeConnected(client.ID, participantCount)))
-	log.Printf("Client %d (%s) connected", client.ID, username)
+	connMu.WriteMessage(websocket.TextMessage, []byte(protocol.MakeConnected(client.ID, participantCount)))
+	log.Printf("Client %d (%s) connected", client.ID, msg.Username)
 
 	// Отправляем список участников новому клиенту
 	if err := s.SendParticipantsTo(client); err != nil {
@@ -104,7 +146,7 @@ func (s *ChatServer) HandleConnect(conn *websocket.Conn, msg map[string]interfac
 	}
 
 	// Уведомляем остальных о новом участнике
-	joinMsg := protocol.MakeSystemMessage(username + " joined the chat")
+	joinMsg := protocol.MakeSystemMessage(msg.Username + " joined the chat")
 	s.Broadcast(joinMsg, []int{client.ID})
 
 	// Рассылаем обновлённый список участников остальным
@@ -118,66 +160,11 @@ func (s *ChatServer) HandleConnect(conn *websocket.Conn, msg map[string]interfac
 	return client
 }
 
-// HandleBroadcast обрабатывает обычное сообщение для рассылки
-func (s *ChatServer) HandleBroadcast(client *ClientInfo, msg map[string]interface{}) {
-	content, _ := msg["content"].(string)
-	messageID, _ := msg["message_id"].(string)
-	senderUsername := s.GetClientUsername(client.ID)
-
-	// ACK отправителю
-	ackMsg := protocol.MakeAck(messageID, senderUsername)
-	client.Conn.WriteMessage(websocket.TextMessage, []byte(ackMsg))
-	log.Printf("Message from %d acknowledged", client.ID)
-
-	// Broadcast всем кроме отправителя
-	broadcastMsg := protocol.MakeBroadcast(client.ID, senderUsername, content)
-	s.Broadcast(broadcastMsg, []int{client.ID})
-	log.Printf("Broadcast message from %d: %s", client.ID, truncateString(content, 50))
-}
-
-// HandleDirect обрабатывает личное сообщение (relay без расшифровки)
-func (s *ChatServer) HandleDirect(client *ClientInfo, msg map[string]interface{}) {
-	targetIDFloat, _ := msg["target_id"].(float64)
-	targetID := int(targetIDFloat)
-	content, _ := msg["content"].(string)
-	nonce, _ := msg["nonce"].(string)
-	messageID, _ := msg["message_id"].(string)
-	senderUsername := s.GetClientUsername(client.ID)
-
-	// ACK отправителю
-	ackMsg := protocol.MakeAck(messageID, senderUsername)
-	client.Conn.WriteMessage(websocket.TextMessage, []byte(ackMsg))
-	log.Printf("Message from %d acknowledged", client.ID)
-
-	// Relay DM целевому клиенту (сервер НЕ расшифровывает)
-	targetConn := s.GetClientConn(targetID)
-	if targetConn != nil {
-		directMsg := protocol.MakeDirectRelay(client.ID, senderUsername, targetID, content, nonce, messageID)
-		targetConn.WriteMessage(websocket.TextMessage, []byte(directMsg))
-		log.Printf("Direct message from %d to %d: [encrypted]", client.ID, targetID)
-	} else {
-		log.Printf("Target client %d not found for DM from %d", targetID, client.ID)
-	}
-}
-
-// HandleDisconnect обрабатывает отключение клиента
-func (s *ChatServer) HandleDisconnect(clientID int) {
-	username := s.GetClientUsername(clientID)
-	s.RemoveClient(clientID)
-
-	leaveMsg := protocol.MakeSystemMessage(username + " left the chat")
-	s.Broadcast(leaveMsg, nil)
-
-	s.SendParticipantsToAll(nil)
-	log.Printf("Client %d (%s) disconnected", clientID, username)
-}
-
-// truncateString обрезает строку до указанной длины
-func truncateString(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen]
-	}
-	return s
+// ParseConnectMessage парсит сообщение подключения
+func ParseConnectMessage(data string) (*protocol.ConnectMessage, error) {
+	var msg protocol.ConnectMessage
+	err := json.Unmarshal([]byte(data), &msg)
+	return &msg, err
 }
 
 // HandleModelMessage обрабатывает сообщение в чат модели
@@ -226,12 +213,18 @@ func (s *ChatServer) HandleModelMessage(client *ClientInfo, msg map[string]inter
 	messages := []Message{{Role: "user", Content: content}}
 
 	go func() {
+		firstChunkLogged := false
 		err := llmClient.StreamMessage(messages, func(chunk string, done bool) {
 			if done {
 				payload := protocol.MakeModelMessage(modelID, modelName, "", true, false)
 				client.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
 				log.Printf("Model streaming to client %d completed (model: %s)", client.ID, modelID)
 				return
+			}
+
+			if !firstChunkLogged && chunk != "" {
+				log.Printf("Model first chunk for client %d (model %s): %s", client.ID, modelID, truncateString(chunk, 50))
+				firstChunkLogged = true
 			}
 
 			payload := protocol.MakeModelMessage(modelID, modelName, chunk, false, true)
@@ -242,28 +235,16 @@ func (s *ChatServer) HandleModelMessage(client *ClientInfo, msg map[string]inter
 
 		if err != nil {
 			log.Printf("Model streaming error for client %d (model %s): %v", client.ID, modelID, err)
-			errData := protocol.MakeModelMessage(modelID, modelName, "Error: "+err.Error(), true, false)
+			errData := protocol.MakeModelMessage(modelID, modelName, "Error: "+err.Error()+"", true, false)
 			client.Conn.WriteMessage(websocket.TextMessage, []byte(errData))
 		}
 	}()
 }
 
-// ParseConnectMessage парсит сообщение подключения
-func ParseConnectMessage(data string) (*protocol.ConnectMessage, error) {
-	var msg protocol.ConnectMessage
-	err := json.Unmarshal([]byte(data), &msg)
-	if err != nil {
-		return nil, err
+// truncateString обрезает строку до указанной длины
+func truncateString(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen]
 	}
-	return &msg, nil
-}
-
-// ParseDirectMessage парсит личное сообщение
-func ParseDirectMessage(data string) (*protocol.DirectMessage, error) {
-	var msg protocol.DirectMessage
-	err := json.Unmarshal([]byte(data), &msg)
-	if err != nil {
-		return nil, err
-	}
-	return &msg, nil
+	return s
 }

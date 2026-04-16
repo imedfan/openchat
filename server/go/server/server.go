@@ -18,12 +18,36 @@ type WSConn interface {
 	Close() error
 }
 
+// ConnMutex — обёртка с мьютексом для безопасных записей в WebSocket
+type ConnMutex struct {
+	conn WSConn
+	mu   sync.Mutex
+}
+
+func NewConnMutex(conn WSConn) *ConnMutex {
+	return &ConnMutex{conn: conn}
+}
+
+func (c *ConnMutex) WriteMessage(messageType int, data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn.WriteMessage(messageType, data)
+}
+
+func (c *ConnMutex) ReadMessage() (int, []byte, error) {
+	return c.conn.ReadMessage()
+}
+
+func (c *ConnMutex) Close() error {
+	return c.conn.Close()
+}
+
 // ClientInfo — информация о подключённом клиенте
 type ClientInfo struct {
 	ID        int
 	Username  string
 	PublicKey []byte
-	Conn      WSConn
+	Conn      *ConnMutex
 }
 
 // ChatServer — WebSocket сервер чата
@@ -182,7 +206,7 @@ func (s *ChatServer) Broadcast(message string, exclude []int) {
 }
 
 // AddClient добавляет нового клиента
-func (s *ChatServer) AddClient(username string, publicKey []byte, conn *websocket.Conn) *ClientInfo {
+func (s *ChatServer) AddClient(username string, publicKey []byte, connMu *ConnMutex) *ClientInfo {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 
@@ -190,7 +214,7 @@ func (s *ChatServer) AddClient(username string, publicKey []byte, conn *websocke
 		ID:        s.ClientIDCounter,
 		Username:  username,
 		PublicKey: publicKey,
-		Conn:      conn,
+		Conn:      connMu,
 	}
 	s.Clients[client.ID] = client
 	s.ClientIDCounter++
@@ -210,6 +234,64 @@ func (s *ChatServer) RemoveClient(clientID int) *ClientInfo {
 
 	delete(s.Clients, clientID)
 	return client
+}
+
+// HandleDisconnect обрабатывает отключение клиента
+func (s *ChatServer) HandleDisconnect(clientID int) {
+	// Удаляем клиента
+	client := s.RemoveClient(clientID)
+	if client == nil {
+		return
+	}
+
+	// Уведомляем остальных о выходе
+	msg := protocol.MakeSystemMessage(s.GetClientUsername(clientID) + " left the chat")
+	s.Broadcast(msg, []int{})
+
+	// Рассылаем обновлённый список участников
+	s.SendParticipantsToAll(nil)
+
+	log.Printf("Client %d (%s) disconnected", client.ID, client.Username)
+}
+
+// HandleBroadcast обрабатывает широковещательное сообщение
+func (s *ChatServer) HandleBroadcast(client *ClientInfo, msg map[string]interface{}) {
+	content, _ := msg["content"].(string)
+	messageID, _ := msg["message_id"].(string)
+
+	// Отправляем ack отправителю
+	ackMsg := protocol.MakeAck(messageID, client.Username)
+	client.Conn.WriteMessage(websocket.TextMessage, []byte(ackMsg))
+
+	// Рассылаем сообщение всем
+	payload := protocol.MakeBroadcast(client.ID, client.Username, content)
+	s.Broadcast(payload, []int{})
+}
+
+// HandleDirect обрабатывает личное сообщение
+func (s *ChatServer) HandleDirect(client *ClientInfo, msg map[string]interface{}) {
+	to, _ := msg["to"].(float64)
+	targetID := int(to)
+	content, _ := msg["content"].(string)
+	messageID, _ := msg["message_id"].(string)
+	encrypted, _ := msg["encrypted"].(bool)
+
+	// Отправляем ack отправителю
+	ackMsg := protocol.MakeAck(messageID, client.Username)
+	client.Conn.WriteMessage(websocket.TextMessage, []byte(ackMsg))
+
+	// Создаём сообщение для relay
+	payload := protocol.MakeDirectRelay(client.ID, client.Username, targetID, content, "", messageID)
+
+	// Отправляем получателю
+	if _, ok := s.Clients[targetID]; ok {
+		client.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+
+		// Отправляем отправителю копию, если не зашифровано
+		if !encrypted {
+			s.Broadcast(payload, []int{})
+		}
+	}
 }
 
 // GetClientUsername безопасно получает username клиента

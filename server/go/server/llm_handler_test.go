@@ -40,7 +40,7 @@ func TestHandleLLMRequest_MissingModelID(t *testing.T) {
 
 	// Создаём mock-клиент с buffered connection для захвата ответов
 	conn := NewMockConn()
-	client := &ClientInfo{ID: 1, Username: "tester", Conn: conn}
+	client := &ClientInfo{ID: 1, Username: "tester", Conn: NewConnMutex(conn)}
 
 	msg := map[string]interface{}{
 		"type":     protocol.MsgLLMRequest,
@@ -74,7 +74,7 @@ func TestHandleLLMRequest_ModelNotFound(t *testing.T) {
 	server := NewChatServer("127.0.0.1", 5000, models)
 
 	conn := NewMockConn()
-	client := &ClientInfo{ID: 1, Username: "tester", Conn: conn}
+	client := &ClientInfo{ID: 1, Username: "tester", Conn: NewConnMutex(conn)}
 
 	msg := map[string]interface{}{
 		"type":     protocol.MsgLLMRequest,
@@ -108,7 +108,7 @@ func TestHandleLLMRequest_NoMessages(t *testing.T) {
 	server := NewChatServer("127.0.0.1", 5000, models)
 
 	conn := NewMockConn()
-	client := &ClientInfo{ID: 1, Username: "tester", Conn: conn}
+	client := &ClientInfo{ID: 1, Username: "tester", Conn: NewConnMutex(conn)}
 
 	msg := map[string]interface{}{
 		"type":     protocol.MsgLLMRequest,

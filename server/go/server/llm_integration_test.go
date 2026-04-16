@@ -58,7 +58,7 @@ func TestLLMIntegration_FullFlow(t *testing.T) {
 
 	// Создаём мокированного клиента
 	conn := NewMockConn()
-	client := &ClientInfo{ID: 1, Username: "tester", Conn: conn}
+	client := &ClientInfo{ID: 1, Username: "tester", Conn: NewConnMutex(conn)}
 
 	// Отправляем LLM-запрос
 	msg := map[string]interface{}{
@@ -119,7 +119,7 @@ func TestLLMIntegration_ModelNotFound(t *testing.T) {
 	})
 
 	conn := NewMockConn()
-	client := &ClientInfo{ID: 1, Username: "tester", Conn: conn}
+	client := &ClientInfo{ID: 1, Username: "tester", Conn: NewConnMutex(conn)}
 
 	msg := map[string]interface{}{
 		"type":     "llm_request",

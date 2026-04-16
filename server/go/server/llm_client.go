@@ -37,9 +37,16 @@ func NewLLMClient(model common.ModelConfig) *LLMClient {
 // StreamMessage отправляет streaming-запрос к LLM API и вызывает callback для каждого чанка
 // callback(chunk, done) — done=true означает завершение стриминга
 func (c *LLMClient) StreamMessage(messages []Message, callback func(chunk string, done bool)) error {
+	// Пробуем получить API-ключ из переменной окружения
 	apiKey := os.Getenv(c.model.EnvKey)
-	if apiKey == "" && c.model.EnvKey != "" {
-		return fmt.Errorf("environment variable %s is not set", c.model.EnvKey)
+	
+	// Если переменная окружения не найдена, используем envKey как сам ключ
+	if apiKey == "" {
+		apiKey = c.model.EnvKey
+	}
+	
+	if apiKey == "" {
+		return fmt.Errorf("API key not set (envKey: %s)", c.model.EnvKey)
 	}
 
 	url := c.model.BaseURL + "/chat/completions"

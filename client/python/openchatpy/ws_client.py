@@ -190,23 +190,6 @@ class WSClient:
     # ── Цикл приёма ─────────────────────────────────────────
 
     async def _receive_loop(self):
-        # Настройка Pong обработчика
-        self.websocket.pong_received = self._handle_pong
-        
-        # Таймер для периодической отправки ping
-        async def send_heartbeat():
-            while self.running:
-                try:
-                    await self.websocket.ping()
-                    logger.info("Heartbeat ping sent")
-                except Exception as e:
-                    logger.error(f"Failed to send heartbeat: {e}")
-                    break
-                await asyncio.sleep(30)  # Ping каждые 30 секунд, совпадает с сервером
-                
-        # Запускаем heartbeat в фоне
-        heartbeat_task = asyncio.create_task(send_heartbeat())
-        
         try:
             async for raw_message in self.websocket:
                 message = json.loads(raw_message)
@@ -253,9 +236,6 @@ class WSClient:
 
         finally:
             self.connected = False
-            # Отменяем heartbeat таск
-            if 'heartbeat_task' in locals():
-                heartbeat_task.cancel()
             # Очищаем participants при отключении (только себя оставляем)
             self.participants = {}
             if self.client_id:
@@ -265,9 +245,6 @@ class WSClient:
                 }
             self.app.call_later(self.app.update_contacts_list)
             
-    def _handle_pong(self, pong_data):
-        """Обработчик для Pong ответов от сервера."""
-        logger.info("Received pong")
     def _handle_ack(self, message: dict):
         msg_id = message.get("message_id")
         if msg_id in self.pending_messages:
@@ -632,7 +609,7 @@ class WSClient:
                         line = line.strip()
                         if not line:
                             continue
-                        
+
                         # SSE формат: data: {...}
                         if line.startswith(b"data: "):
                             data = line[6:]  # убираем "data: "
@@ -648,7 +625,7 @@ class WSClient:
                                         except Exception as e:
                                             logger.error(f"Callback error on done: {e}")
                                 break
-                            
+
                             try:
                                 # Разбираем JSON
                                 chunk_data = json.loads(data)
@@ -666,6 +643,8 @@ class WSClient:
                                                     cb(content, False)  # done=False
                                                 except Exception as e:
                                                     logger.error(f"Callback error: {e}")
+                                        # Отдаём управление event loop'у чтобы UI обновился плавно
+                                        await asyncio.sleep(0.01)
                             except json.JSONDecodeError:
                                 logger.warning(f"Invalid JSON in LLM stream: {data}")
             except Exception as e:
